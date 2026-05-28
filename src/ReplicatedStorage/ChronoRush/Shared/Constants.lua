@@ -7,9 +7,9 @@ local Constants = {}
 
 -- Movement Settings
 Constants.MOVE_SPEED = 20 -- Base walk speed
-Constants.ACCELERATION = 200 -- How fast player reaches max speed (higher = snappier)
-Constants.DECELERATION = 200 -- How fast player stops (higher = snappier stop)
-Constants.AIR_CONTROL = 0.8 -- Control while airborne (0-1)
+Constants.ACCELERATION = 100 -- How fast player reaches max speed (balanced)
+Constants.DECELERATION = 80 -- How fast player stops (balanced)
+Constants.AIR_CONTROL = 0.75 -- Control while airborne (0-1)
 
 -- Jump Settings
 Constants.JUMP_FORCE = 50 -- Jump height power
