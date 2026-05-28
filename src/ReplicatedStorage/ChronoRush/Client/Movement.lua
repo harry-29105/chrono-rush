@@ -66,11 +66,11 @@ function Movement:Start()
     self.BodyVelocity.MaxForce = Vector3.new(math.huge, 0, math.huge)
     self.BodyVelocity.Parent = self.RootPart
     
-    -- Create BodyGyro for character rotation
+    -- Create BodyGyro for character rotation (snappier)
     self.BodyGyro = Instance.new("BodyGyro")
     self.BodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-    self.BodyGyro.P = 10000
-    self.BodyGyro.D = 500
+    self.BodyGyro.P = 20000 -- Higher P = snappier rotation
+    self.BodyGyro.D = 1000  -- Higher D = less oscillation
     self.BodyGyro.Parent = self.RootPart
     
     -- Track WASD keys for raw input
