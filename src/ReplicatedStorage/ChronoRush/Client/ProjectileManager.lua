@@ -32,9 +32,17 @@ function ProjectileManager.new()
     
     -- Player position tracking
     self.PlayerZ = 0
-    self.LevelLength = 0
+    self.LevelLength = 100
+    self.StartZ = 0
+    self.FinishZ = 100
     
     return self
+end
+
+function ProjectileManager:SetLevelBounds(startZ, finishZ)
+    self.StartZ = startZ
+    self.FinishZ = finishZ
+    self.LevelLength = finishZ - startZ
 end
 
 function ProjectileManager:Start()
@@ -100,12 +108,12 @@ function ProjectileManager:OnProjectileSpawn(patternName, speed, playerZ, levelL
 end
 
 function ProjectileManager:SpawnSingleProjectile(playerZ, levelLength, speed)
-    -- Spawn projectile ahead of player
+    -- Spawn projectile ahead of player (in +Z direction from player)
     local spawnDistance = 80 + math.random(0, 40)
     local spawnZ = playerZ + spawnDistance
     
-    -- Random X offset for variety
-    local offsetX = math.random(-30, 30)
+    -- Random X offset for variety (within corridor)
+    local offsetX = math.random(-25, 25)
     
     local spawnPos = Vector3.new(offsetX, 5, spawnZ)
     
@@ -139,9 +147,8 @@ function ProjectileManager:SpawnAimedPattern(playerZ, levelLength, speed)
     local offsetX = math.random(-25, 25)
     local spawnPos = Vector3.new(offsetX, 5, spawnZ)
     
-    -- Aim directly at player (slight spread)
-    local aimOffsetX = math.random(-10, 10)
-    local direction = Vector3.new(aimOffsetX * 0.02, -0.1, -1).Unit
+    -- Aim directly at player
+    local direction = Vector3.new(0, 0, -1).Unit
     
     self:CreateProjectile(spawnPos, direction, speed * 1.2, true)
 end

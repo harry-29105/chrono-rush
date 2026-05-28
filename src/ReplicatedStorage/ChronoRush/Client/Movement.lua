@@ -48,21 +48,19 @@ function Movement.new(character)
     self.SKeyDown = false
     self.DKeyDown = false
     
-    -- Idle tracking to reset BodyGyro
+    -- Idle tracking
     self.IdleTimer = 0
-    self.BodyGyroEnabled = true
     
     return self
 end
 
 function Movement:Start()
-    -- Wait for character to be loaded
     if not self.Humanoid or not self.RootPart then
         return
     end
     
     -- Set initial physics
-    self.Humanoid.WalkSpeed = 0 -- We control movement manually
+    self.Humanoid.WalkSpeed = 0
     self.Humanoid.JumpPower = Constants.JUMP_FORCE
     
     -- Create BodyVelocity for custom movement
@@ -70,14 +68,14 @@ function Movement:Start()
     self.BodyVelocity.MaxForce = Vector3.new(math.huge, 0, math.huge)
     self.BodyVelocity.Parent = self.RootPart
     
-    -- Create BodyGyro for character rotation (balanced)
+    -- Create BodyGyro for character rotation
     self.BodyGyro = Instance.new("BodyGyro")
     self.BodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-    self.BodyGyro.P = 12000 -- Balanced P = smooth but responsive rotation
-    self.BodyGyro.D = 800   -- Balanced D = less wobble
+    self.BodyGyro.P = 12000
+    self.BodyGyro.D = 800
     self.BodyGyro.Parent = self.RootPart
     
-    -- Track WASD keys for raw input
+    -- Track WASD keys
     self:SetupInputTracking()
     
     -- Update loop
@@ -87,7 +85,6 @@ function Movement:Start()
 end
 
 function Movement:SetupInputTracking()
-    -- Track W key
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then return end
         if input.KeyCode == Enum.KeyCode.W then self.WKeyDown = true end
@@ -105,7 +102,6 @@ function Movement:SetupInputTracking()
 end
 
 function Movement:GetRawInputDirection()
-    -- Get raw WASD input as 2D vector (camera-relative)
     local inputX = 0
     local inputZ = 0
     
@@ -124,13 +120,12 @@ function Movement:Update(dt)
     if not humanoid or not rootPart then return end
     if not self.BodyVelocity or not self.BodyGyro then return end
     
-    -- CHECK IF DASHING - override velocity if so
+    -- CHECK IF DASHING
     if self.Character and self.Character:GetAttribute("Dashing") then
         local dashEndTime = self.Character:GetAttribute("DashEndTime") or 0
         local dashDir = self.Character:GetAttribute("DashDirection")
         
         if dashDir and tick() < dashEndTime then
-            -- DASH MODE
             self.BodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
             local currentY = rootPart.Velocity.Y
             self.BodyVelocity.Velocity = Vector3.new(
@@ -139,7 +134,7 @@ function Movement:Update(dt)
                 dashDir.Z * Constants.DASH_SPEED
             )
             
-            -- Rotate character to face dash direction
+            -- Rotate to face dash direction
             self:RotateCharacterToDirection(dashDir)
             return
         else
@@ -156,12 +151,12 @@ function Movement:Update(dt)
     local rawInput = self:GetRawInputDirection()
     local moveDir = self.CameraCtrl:ConvertToCameraRelative(rawInput)
     
-    -- Store last input for dash fallback
+    -- Store last input
     if moveDir.Magnitude > 0.01 then
         self.LastMoveInput = moveDir
     end
     
-    -- Apply acceleration/deceleration for smooth feel
+    -- Apply acceleration/deceleration
     if moveDir.Magnitude > 0.01 then
         self.CurrentVelocity = self.CurrentVelocity:Lerp(
             moveDir * Constants.MOVE_SPEED,
@@ -174,34 +169,31 @@ function Movement:Update(dt)
         )
     end
     
-    -- Air control (reduce acceleration in air)
+    -- Air control
     local isAirborne = humanoid:GetState() ~= Enum.HumanoidStateType.Running
     if isAirborne then
         self.CurrentVelocity = self.CurrentVelocity * Constants.AIR_CONTROL
     end
     
-    -- Only move horizontally (preserve jump/fall via physics)
+    -- Only move horizontally
     local horizontalVel = Vector3.new(self.CurrentVelocity.X, 0, self.CurrentVelocity.Z)
     self.BodyVelocity.Velocity = horizontalVel
     
-    -- CHARACTER ROTATION based on shift lock state
+    -- CHARACTER ROTATION
     local isMoving = moveDir.Magnitude > 0.01
     
     if self.CameraCtrl.IsShiftLockEnabled then
-        -- Shift ON: Face camera direction, keep BodyGyro enabled
         self.BodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
         local cameraYaw = self.CameraCtrl:GetCameraYaw()
         self:RotateCharacterToYaw(cameraYaw)
         self.IdleTimer = 0
         
     elseif isMoving then
-        -- Shift OFF + Moving: Face movement direction
         self.BodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
         self:RotateCharacterToDirection(moveDir)
         self.IdleTimer = 0
         
     else
-        -- Not moving: track idle time, disable BodyGyro after brief delay
         self.IdleTimer = self.IdleTimer + dt
         if self.IdleTimer > 0.1 then
             self.BodyGyro.MaxTorque = Vector3.new(0, 0, 0)
@@ -210,23 +202,17 @@ function Movement:Update(dt)
 end
 
 function Movement:RotateCharacterToDirection(direction)
-    -- Flatten to horizontal
     local flatDir = Vector3.new(direction.X, 0, direction.Z)
     if flatDir.Magnitude < 0.01 then return end
     flatDir = flatDir.Unit
     
-    -- Create CFrame that faces the direction
     local targetCFrame = CFrame.lookAt(self.RootPart.Position, self.RootPart.Position + flatDir)
-    
-    -- Apply rotation (keep current Y position)
     self.BodyGyro.CFrame = targetCFrame
 end
 
 function Movement:RotateCharacterToYaw(yaw)
-    -- Create CFrame with just Y rotation
     local targetCFrame = CFrame.Angles(0, yaw, 0)
     targetCFrame = targetCFrame + self.RootPart.Position
-    
     self.BodyGyro.CFrame = targetCFrame
 end
 

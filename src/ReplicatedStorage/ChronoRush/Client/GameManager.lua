@@ -1,11 +1,12 @@
 --[[
-    ChronoRush - Game Manager (Runner Mode)
-    Main game loop for runner-style gameplay
+    ChronoRush - Game Manager (Corridor Runner)
+    Main game loop with original camera-relative movement
     
-    - Player runs forward on a straight path
-    - Projectiles fly from the front
-    - Reach finish line to complete level
-    - 10 levels with increasing difficulty
+    Game concept:
+    - Original WASD movement (camera-relative)
+    - Map has walls on sides, straight corridor path
+    - Projectiles fly from ahead, player moves freely
+    - Reach finish line (Z position) to complete level
 ]]
 
 local Players = game:GetService("Players")
@@ -14,11 +15,12 @@ local UserInputService = game:GetService("UserInputService")
 
 local ChronoRushClient = ReplicatedStorage:WaitForChild("ChronoRush"):WaitForChild("Client")
 
+local Movement = require(ChronoRushClient:WaitForChild("Movement"))
 local Jump = require(ChronoRushClient:WaitForChild("Jump"))
 local Dash = require(ChronoRushClient:WaitForChild("Dash"))
 local Combo = require(ChronoRushClient:WaitForChild("Combo"))
 local ProjectileManager = require(ChronoRushClient:WaitForChild("ProjectileManager"))
-local RunnerController = require(ChronoRushClient:WaitForChild("RunnerController"))
+local CameraController = require(ChronoRushClient:WaitForChild("CameraController"))
 local UIManager = require(ChronoRushClient:WaitForChild("UIManager"))
 
 local GameManager = {}
@@ -35,12 +37,17 @@ function GameManager.new()
     self.IsGameOver = false
     
     -- Modules
-    self.RunnerController = nil
+    self.Movement = nil
     self.Jump = nil
     self.Dash = nil
     self.Combo = nil
     self.ProjectileManager = nil
+    self.CameraController = nil
     self.UI = nil
+    
+    -- Level state
+    self.StartZ = 0
+    self.FinishZ = 100
     
     return self
 end
@@ -64,6 +71,14 @@ end
 
 function GameManager:OnCharacterAdded(character)
     self.Character = character
+    
+    -- Store starting Z position
+    task.wait(0.5)
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if rootPart then
+        self.StartZ = rootPart.Position.Z
+    end
+    
     self:InitializeModules()
 end
 
@@ -74,16 +89,9 @@ function GameManager:InitializeModules()
     self.UI = UIManager.new()
     self.UI:Create()
     
-    -- Runner Controller (handles movement)
-    self.RunnerController = RunnerController.new(self.Character)
-    self.RunnerController:Start()
-    
-    -- Notify position updates to projectile manager
-    self.RunnerController.OnPositionUpdate = function(z)
-        if self.ProjectileManager then
-            self.ProjectileManager:UpdatePlayerPosition(z)
-        end
-    end
+    -- Movement (original camera-relative)
+    self.Movement = Movement.new(self.Character)
+    self.Movement:Start()
     
     -- Jump
     self.Jump = Jump.new(self.Character)
@@ -96,6 +104,10 @@ function GameManager:InitializeModules()
     -- Combo
     self.Combo = Combo.new()
     self.Combo:Start()
+    
+    -- Camera Controller
+    self.CameraController = CameraController.new()
+    self.CameraController:Start()
     
     -- Projectile Manager
     self.ProjectileManager = ProjectileManager.new()
@@ -144,11 +156,10 @@ function GameManager:SetupHitDetection()
     
     local rootPart = self.Character:WaitForChild("HumanoidRootPart")
     
-    -- Create invisible hitbox
     local hitbox = Instance.new("Part")
     hitbox.Name = "Hitbox"
     hitbox.Size = Vector3.new(4, 4, 4)
-    hitbox.Shape = Enum.PartShape.Ball
+    hitbox.Shape = Enum.PartType.Ball
     hitbox.Anchored = false
     hitbox.CanCollide = false
     hitbox.Transparency = 1
@@ -174,34 +185,67 @@ function GameManager:StartGame()
     
     self.IsPlaying = true
     
+    -- Set finish Z based on start position
+    local rootPart = self.Character and self.Character:FindFirstChild("HumanoidRootPart")
+    if rootPart then
+        self.StartZ = rootPart.Position.Z
+    end
+    
     if self.ProjectileManager then
         self.ProjectileManager:StartGame()
     end
     
-    print("=== RUNNER GAME STARTED ===")
-    print("Controls: WASD=Move, Space=Jump, Q=Dash")
+    print("=== GAME STARTED ===")
+    print("Controls: WASD=Move (camera-relative), Space=Jump, Q=Dash")
     print("Goal: Reach the finish line!")
 end
 
 function GameManager:OnLevelStart(level, config)
     local totalLevels = self.ProjectileManager.LevelManager:GetTotalLevels()
     self.UI:UpdateLevel(level, totalLevels)
-    self.UI:ShowMessage("Level " .. level .. "\nDistance: " .. config.length .. "m", 2, Color3.fromRGB(100, 255, 200))
+    self.UI:ShowMessage("Level " .. level .. "\nRun to finish!", 2, Color3.fromRGB(100, 255, 200))
     self.UI:UpdateProgress(0)
     
-    -- Update camera zoom for runner view
+    -- Set finish line Z position
+    local rootPart = self.Character and self.Character:FindFirstChild("HumanoidRootPart")
+    if rootPart then
+        self.StartZ = rootPart.Position.Z
+        self.FinishZ = self.StartZ + config.length
+    end
+    
+    -- Update projectile manager with positions
+    if self.ProjectileManager then
+        self.ProjectileManager:SetLevelBounds(self.StartZ, self.FinishZ)
+    end
+    
+    -- Set camera zoom
     self.Player.CameraMinZoomDistance = 15
-    self.Player.CameraMaxZoomDistance = 20
+    self.Player.CameraMaxZoomDistance = 50
 end
 
 function GameManager:OnProgress(playerZ, levelLength)
-    local progress = math.clamp(playerZ / levelLength, 0, 1)
+    -- Calculate progress based on Z position
+    local progress = math.clamp((playerZ - self.StartZ) / levelLength, 0, 1)
     self.UI:UpdateProgress(progress)
     
     -- Update timer
     if self.ProjectileManager and self.ProjectileManager.LevelManager then
         local timeRemaining = self.ProjectileManager.LevelManager:GetTimeRemaining()
         self.UI:UpdateTimer(timeRemaining)
+    end
+    
+    -- Check if reached finish
+    if playerZ >= self.FinishZ and self.IsPlaying then
+        self:OnReachFinish()
+    end
+end
+
+function GameManager:OnReachFinish()
+    if not self.IsPlaying then return end
+    
+    -- Level complete!
+    if self.ProjectileManager and self.ProjectileManager.LevelManager then
+        self.ProjectileManager.LevelManager:LevelComplete()
     end
 end
 
@@ -212,7 +256,6 @@ function GameManager:OnLevelComplete(level)
         self.Combo:BreakCombo()
     end
     
-    -- Clear projectiles and advance
     if self.ProjectileManager then
         self.ProjectileManager:ClearAllProjectiles()
     end
@@ -390,14 +433,12 @@ function GameManager:RestartGame()
     self.IsGameOver = false
     self.IsPlaying = false
     
-    -- Clear UI
     if self.UI then
         self.UI:Destroy()
     end
     self.UI = UIManager.new()
     self.UI:Create()
     
-    -- Restart
     task.delay(1, function()
         self:StartGame()
     end)
@@ -414,8 +455,11 @@ function GameManager:Destroy()
     if self.UI then
         self.UI:Destroy()
     end
-    if self.RunnerController then
-        self.RunnerController:Destroy()
+    if self.Movement then
+        self.Movement:Destroy()
+    end
+    if self.CameraController then
+        self.CameraController:Destroy()
     end
 end
 
