@@ -194,8 +194,8 @@ function GameManager:StartLevelObstacle()
 end
 
 function GameManager:OnObstacleComplete(obstacleType)
-    -- Award tokens
-    local tokenReward = 50
+    -- Award tokens (reduced for monetization)
+    local tokenReward = 10 -- Checkpoint reward
     self.TokenManager:AddTokens(tokenReward)
     self.UI:UpdateTokens(self.TokenManager:GetTokens())
     
@@ -226,8 +226,8 @@ function GameManager:CheckLevelComplete()
 end
 
 function GameManager:CompleteLevel()
-    self.UI:ShowMessage("Level 1 Complete! +100 tokens", 4, Color3.fromRGB(100, 255, 100))
-    self.TokenManager:AddTokens(100)
+    self.UI:ShowMessage("Level 1 Complete! +25 tokens", 4, Color3.fromRGB(100, 255, 100))
+    self.TokenManager:AddTokens(25)
     
     -- Show victory for now (can expand later)
     task.delay(4, function()

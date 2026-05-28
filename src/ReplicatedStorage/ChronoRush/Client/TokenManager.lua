@@ -17,9 +17,9 @@ function TokenManager.new()
     self.Tokens = 0
     self.LifetimeTokens = 0 -- Tokens earned total (doesn't reset on fail)
     
-    -- Token rewards
-    self.CheckpointReward = 50 -- Tokens per checkpoint
-    self.LevelCompleteReward = 100 -- Tokens for completing level
+    -- Token rewards (reduced for monetization)
+    self.CheckpointReward = 10 -- Tokens per checkpoint (was 50)
+    self.LevelCompleteReward = 25 -- Tokens for completing level (was 100)
     
     return self
 end
