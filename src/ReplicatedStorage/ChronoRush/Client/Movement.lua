@@ -1,7 +1,7 @@
 --[[
     ChronoRush - Movement Module
     Handles player movement with smooth acceleration/deceleration
-    Blox Fruits-inspired floaty but responsive feel
+    Camera-relative movement: W moves towards camera facing direction
     Cooperates with Dash module via character attributes
 ]]
 
@@ -10,7 +10,10 @@ local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ChronoRushClient = ReplicatedStorage:WaitForChild("ChronoRush"):WaitForChild("Client")
+
 local Constants = require(ReplicatedStorage:WaitForChild("ChronoRush"):WaitForChild("Shared"):WaitForChild("Constants"))
+local CameraController = require(ChronoRushClient:WaitForChild("CameraController"))
 
 local Movement = {}
 Movement.__index = Movement
@@ -27,8 +30,18 @@ function Movement.new(character)
     self.CurrentVelocity = Vector3.new()
     self.LastMoveInput = Vector3.new()
     
+    -- Camera controller for relative movement
+    self.CameraCtrl = CameraController.new()
+    self.CameraCtrl:Start()
+    
     -- Physics
     self.BodyVelocity = nil
+    
+    -- WASD key tracking
+    self.WKeyDown = false
+    self.AKeyDown = false
+    self.SKeyDown = false
+    self.DKeyDown = false
     
     return self
 end
@@ -40,7 +53,7 @@ function Movement:Start()
     end
     
     -- Set initial physics
-    self.Humanoid.WalkSpeed = Constants.MOVE_SPEED
+    self.Humanoid.WalkSpeed = 0 -- We control movement manually
     self.Humanoid.JumpPower = Constants.JUMP_FORCE
     
     -- Create BodyVelocity for custom movement
@@ -48,10 +61,8 @@ function Movement:Start()
     self.BodyVelocity.MaxForce = Vector3.new(math.huge, 0, math.huge)
     self.BodyVelocity.Parent = self.RootPart
     
-    -- Track movement input
-    self.Humanoid:GetPropertyChangedSignal("MoveDirection"):Connect(function()
-        self:OnMoveDirectionChanged()
-    end)
+    -- Track WASD keys for raw input
+    self:SetupInputTracking()
     
     -- Update loop
     self.Connection = RunService.Heartbeat:Connect(function(dt)
@@ -59,11 +70,35 @@ function Movement:Start()
     end)
 end
 
-function Movement:OnMoveDirectionChanged()
-    local moveDir = self.Humanoid.MoveDirection
-    if moveDir.Magnitude > 0 then
-        self.LastMoveInput = moveDir
-    end
+function Movement:SetupInputTracking()
+    -- Track W key
+    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if input.KeyCode == Enum.KeyCode.W then self.WKeyDown = true end
+        if input.KeyCode == Enum.KeyCode.A then self.AKeyDown = true end
+        if input.KeyCode == Enum.KeyCode.S then self.SKeyDown = true end
+        if input.KeyCode == Enum.KeyCode.D then self.DKeyDown = true end
+    end)
+    
+    UserInputService.InputEnded:Connect(function(input, gameProcessed)
+        if input.KeyCode == Enum.KeyCode.W then self.WKeyDown = false end
+        if input.KeyCode == Enum.KeyCode.A then self.AKeyDown = false end
+        if input.KeyCode == Enum.KeyCode.S then self.SKeyDown = false end
+        if input.KeyCode == Enum.KeyCode.D then self.DKeyDown = false end
+    end)
+end
+
+function Movement:GetRawInputDirection()
+    -- Get raw WASD input as 2D vector (camera-relative)
+    local inputX = 0
+    local inputZ = 0
+    
+    if self.WKeyDown then inputZ = inputZ - 1 end
+    if self.SKeyDown then inputZ = inputZ + 1 end
+    if self.AKeyDown then inputX = inputX - 1 end
+    if self.DKeyDown then inputX = inputX + 1 end
+    
+    return Vector2.new(inputX, inputZ)
 end
 
 function Movement:Update(dt)
@@ -98,11 +133,17 @@ function Movement:Update(dt)
     -- NORMAL MOVEMENT - restore X/Z control only
     self.BodyVelocity.MaxForce = Vector3.new(math.huge, 0, math.huge)
     
-    -- Get movement input
-    local moveDir = humanoid.MoveDirection
+    -- Get camera-relative movement direction
+    local rawInput = self:GetRawInputDirection()
+    local moveDir = self.CameraCtrl:ConvertToCameraRelative(rawInput)
+    
+    -- Store last input for dash fallback
+    if moveDir.Magnitude > 0.01 then
+        self.LastMoveInput = moveDir
+    end
     
     -- Apply acceleration/deceleration for smooth feel
-    if moveDir.Magnitude > 0 then
+    if moveDir.Magnitude > 0.01 then
         self.CurrentVelocity = self.CurrentVelocity:Lerp(
             moveDir * Constants.MOVE_SPEED,
             Constants.ACCELERATION * dt
@@ -128,6 +169,9 @@ end
 function Movement:Destroy()
     if self.Connection then
         self.Connection:Disconnect()
+    end
+    if self.CameraCtrl then
+        self.CameraCtrl:Destroy()
     end
     if self.BodyVelocity then
         self.BodyVelocity:Destroy()

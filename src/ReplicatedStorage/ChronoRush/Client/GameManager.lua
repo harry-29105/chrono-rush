@@ -14,6 +14,7 @@ local Jump = require(ChronoRushClient:WaitForChild("Jump"))
 local Dash = require(ChronoRushClient:WaitForChild("Dash"))
 local Combo = require(ChronoRushClient:WaitForChild("Combo"))
 local ProjectileManager = require(ChronoRushClient:WaitForChild("ProjectileManager"))
+local CameraController = require(ChronoRushClient:WaitForChild("CameraController"))
 
 local GameManager = {}
 GameManager.__index = GameManager
@@ -34,6 +35,7 @@ function GameManager.new()
     self.Dash = nil
     self.Combo = nil
     self.ProjectileManager = nil
+    self.CameraController = nil
     
     return self
 end
@@ -98,10 +100,13 @@ function GameManager:InitializeModules()
     self.ProjectileManager = ProjectileManager.new()
     self.ProjectileManager:Start()
     
+    self.CameraController = CameraController.new()
+    self.CameraController:Start()
+    
     -- Auto-start game for immediate testing (remove for production)
     task.delay(1, function()
         self:StartGame()
-        print("Game auto-started - have fun dodging!")
+        print("Game auto-started - Shift = Lock Camera | WASD = Move | Q = Dash | Space = Jump")
     end)
     
     -- Set up hit detection

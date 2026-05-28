@@ -1,7 +1,7 @@
 --[[
     ChronoRush - Dash Module
     Handles dash ability with cooldown and charges
-    Blox Fruits-style: dash in WASD input direction, NOT facing direction
+    Blox Fruits-style: dash in camera-relative WASD direction
 ]]
 
 local Players = game:GetService("Players")
@@ -10,7 +10,10 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ChronoRushClient = ReplicatedStorage:WaitForChild("ChronoRush"):WaitForChild("Client")
+
 local Constants = require(ReplicatedStorage:WaitForChild("ChronoRush"):WaitForChild("Shared"):WaitForChild("Constants"))
+local CameraController = require(ChronoRushClient:WaitForChild("CameraController"))
 
 local Dash = {}
 Dash.__index = Dash
@@ -29,6 +32,9 @@ function Dash.new(character)
     self.Character = character
     self.Humanoid = character:WaitForChild("Humanoid")
     self.RootPart = character:WaitForChild("HumanoidRootPart")
+    
+    -- Camera controller for camera-relative dash
+    self.CameraCtrl = CameraController.new()
     
     -- Dash state
     self.CooldownRemaining = 0
@@ -117,24 +123,18 @@ function Dash:ExecuteDash()
 end
 
 function Dash:GetCurrentInputDirection()
-    -- Check which WASD keys are currently held
-    local direction = Vector3.new()
+    -- Check which WASD keys are currently held, convert to camera-relative
+    local inputX = 0
+    local inputZ = 0
     
-    if UserInputService:IsKeyDown(Enum.KeyCode.W) then
-        direction = direction + Vector3.new(0, 0, -1)
-    end
-    if UserInputService:IsKeyDown(Enum.KeyCode.S) then
-        direction = direction + Vector3.new(0, 0, 1)
-    end
-    if UserInputService:IsKeyDown(Enum.KeyCode.A) then
-        direction = direction + Vector3.new(-1, 0, 0)
-    end
-    if UserInputService:IsKeyDown(Enum.KeyCode.D) then
-        direction = direction + Vector3.new(1, 0, 0)
-    end
+    if UserInputService:IsKeyDown(Enum.KeyCode.W) then inputZ = inputZ - 1 end
+    if UserInputService:IsKeyDown(Enum.KeyCode.S) then inputZ = inputZ + 1 end
+    if UserInputService:IsKeyDown(Enum.KeyCode.A) then inputX = inputX - 1 end
+    if UserInputService:IsKeyDown(Enum.KeyCode.D) then inputX = inputX + 1 end
     
-    if direction.Magnitude > 0 then
-        return direction.Unit
+    if inputX ~= 0 or inputZ ~= 0 then
+        local rawInput = Vector2.new(inputX, inputZ)
+        return self.CameraCtrl:ConvertToCameraRelative(rawInput)
     end
     
     -- Fallback to last movement direction from character
@@ -218,6 +218,9 @@ end
 function Dash:Destroy()
     if self.Connection then
         self.Connection:Disconnect()
+    end
+    if self.CameraCtrl then
+        self.CameraCtrl:Destroy()
     end
 end
 
