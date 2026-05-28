@@ -48,6 +48,10 @@ function Movement.new(character)
     self.SKeyDown = false
     self.DKeyDown = false
     
+    -- Idle tracking to reset BodyGyro
+    self.IdleTimer = 0
+    self.BodyGyroEnabled = true
+    
     return self
 end
 
@@ -181,14 +185,26 @@ function Movement:Update(dt)
     self.BodyVelocity.Velocity = horizontalVel
     
     -- CHARACTER ROTATION based on shift lock state
+    local isMoving = moveDir.Magnitude > 0.01
+    
     if self.CameraCtrl.IsShiftLockEnabled then
-        -- Shift ON: Face camera direction
+        -- Shift ON: Face camera direction, keep BodyGyro enabled
+        self.BodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
         local cameraYaw = self.CameraCtrl:GetCameraYaw()
         self:RotateCharacterToYaw(cameraYaw)
+        self.IdleTimer = 0
+        
+    elseif isMoving then
+        -- Shift OFF + Moving: Face movement direction
+        self.BodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+        self:RotateCharacterToDirection(moveDir)
+        self.IdleTimer = 0
+        
     else
-        -- Shift OFF: Face movement direction
-        if moveDir.Magnitude > 0.01 then
-            self:RotateCharacterToDirection(moveDir)
+        -- Not moving: track idle time, disable BodyGyro after brief delay
+        self.IdleTimer = self.IdleTimer + dt
+        if self.IdleTimer > 0.1 then
+            self.BodyGyro.MaxTorque = Vector3.new(0, 0, 0)
         end
     end
 end
