@@ -1,6 +1,12 @@
 --[[
     ChronoRush - Camera Controller
-    Handles camera-relative movement and Shift lock toggle
+    Handles camera-relative movement, Shift lock toggle, and character rotation
+    
+    Shift Lock: Locks cursor to center so camera rotates without RMB
+    Character Rotation:
+    - Shift OFF: Character faces movement direction (WASD)
+    - Shift ON: Character faces camera direction
+    Scroll Wheel: Always works for zoom (3rd person <-> closer)
 ]]
 
 local Players = game:GetService("Players")
@@ -16,9 +22,17 @@ function CameraController.new()
     self.Player = Players.LocalPlayer
     self.Camera = workspace.CurrentCamera
     
-    -- Shift lock state
+    -- Shift lock state (cursor locked to center, camera rotates freely)
     self.IsShiftLockEnabled = false
-    self.LastMousePosition = nil
+    
+    -- Character rotation mode
+    self.RotateWithCamera = false -- True when shift lock is on
+    
+    -- Camera zoom settings
+    self.MinZoom = 10  -- Closest zoom (FPS-ish)
+    self.MaxZoom = 60  -- Farthest zoom (full 3rd person)
+    self.ZoomStep = 5   -- Scroll wheel step size
+    self.DefaultZoom = 35
     
     return self
 end
@@ -33,7 +47,16 @@ function CameraController:Start()
         end
     end)
     
-    -- Update loop
+    -- Listen for scroll wheel zoom (always works!)
+    UserInputService.InputChanged:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        
+        if input.UserInputType == Enum.UserInputType.MouseWheel then
+            self:HandleZoom(input.Position.Z)
+        end
+    end)
+    
+    -- Update loop - handle character rotation
     self.Connection = RunService.RenderStepped:Connect(function(dt)
         self:Update(dt)
     end)
@@ -41,41 +64,56 @@ end
 
 function CameraController:ToggleShiftLock()
     self.IsShiftLockEnabled = not self.IsShiftLockEnabled
+    self.RotateWithCamera = self.IsShiftLockEnabled
     
     if self.IsShiftLockEnabled then
-        -- Lock camera to cursor position
-        self:LockToCursor()
-        print("Shift Lock: ON")
+        -- Lock cursor to center - camera rotates freely without RMB
+        -- MiddleClick allows mouse look without zooming in to FPS
+        self.Player.CameraMode = Enum.CameraMode.Classic
+        UserInputService.MouseBehavior = Enum.MouseBehavior.MiddleClick
+        
+        -- Set comfortable zoom distance for locked camera
+        self.Player.CameraMinZoomDistance = 25
+        self.Player.CameraMaxZoomDistance = 25
     else
-        -- Release camera
-        self:UnlockFromCursor()
-        print("Shift Lock: OFF")
+        -- Release - allow free mouse look and zoom
+        self.Player.CameraMode = Enum.CameraMode.Classic
+        UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+        
+        -- Reset to default zoom
+        self.Player.CameraMinZoomDistance = 10
+        self.Player.CameraMaxZoomDistance = 128
     end
+    
+    print("Shift Lock: " .. (self.IsShiftLockEnabled and "ON" or "OFF"))
 end
 
-function CameraController:LockToCursor()
-    -- Enable mouse lock
-    self.Player.CameraMode = Enum.CameraMode.LockFirstPerson
+function CameraController:HandleZoom(scrollDelta)
+    -- Always allow zoom regardless of shift lock state
+    local currentZoom = self.Camera.CFrame.LookVector.Magnitude
     
-    -- Lock cursor
-    UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+    if scrollDelta > 0 then
+        -- Scroll up = zoom in (closer)
+        currentZoom = math.max(self.MinZoom, currentZoom - self.ZoomStep)
+    else
+        -- Scroll down = zoom out (farther)
+        currentZoom = math.min(self.MaxZoom, currentZoom + self.ZoomStep)
+    end
+    
+    -- Apply zoom by setting camera offset
+    -- We do this by modifying the camera's subject offset
+    self:SetCameraZoom(currentZoom)
 end
 
-function CameraController:UnlockFromCursor()
-    -- Restore normal camera
-    self.Player.CameraMode = Enum.CameraMode.Classic
-    
-    -- Unlock cursor
-    UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+function CameraController:SetCameraZoom(zoom)
+    -- Set camera distance from character
+    self.Player.CameraMinZoomDistance = zoom
+    self.Player.CameraMaxZoomDistance = zoom
 end
 
 function CameraController:Update(dt)
-    if not self.IsShiftLockEnabled then return end
-    
-    -- Keep cursor locked to center (for FPS-style look)
-    if UserInputService.MouseBehavior ~= Enum.MouseBehavior.LockCenter then
-        UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
-    end
+    -- Character rotation is handled by Movement module
+    -- This just tracks the state
 end
 
 function CameraController:GetCameraRelativeDirections()
@@ -89,14 +127,14 @@ function CameraController:GetCameraRelativeDirections()
     -- Flatten to horizontal (ignore Y component)
     local forward = Vector3.new(lookVector.X, 0, lookVector.Z)
     if forward.Magnitude < 0.01 then
-        forward = Vector3.new(0, 0, -1) -- Default forward
+        forward = Vector3.new(0, 0, -1)
     else
         forward = forward.Unit
     end
     
     local right = Vector3.new(rightVector.X, 0, rightVector.Z)
     if right.Magnitude < 0.01 then
-        right = Vector3.new(1, 0, 0) -- Default right
+        right = Vector3.new(1, 0, 0)
     else
         right = right.Unit
     end
@@ -126,11 +164,24 @@ function CameraController:ConvertToCameraRelative(inputDir)
     end
 end
 
+function CameraController:GetCameraYaw()
+    -- Get camera's Y rotation (for character facing)
+    local lookVector = self.Camera.CFrame.LookVector
+    return math.atan2(-lookVector.X, -lookVector.Z)
+end
+
 function CameraController:Destroy()
     if self.Connection then
         self.Connection:Disconnect()
     end
-    self:UnlockFromCursor()
+    
+    -- Reset camera mode
+    self.Player.CameraMode = Enum.CameraMode.Classic
+    UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+    
+    -- Reset zoom
+    self.Player.CameraMinZoomDistance = 0.5
+    self.Player.CameraMaxZoomDistance = 400
 end
 
 return CameraController
