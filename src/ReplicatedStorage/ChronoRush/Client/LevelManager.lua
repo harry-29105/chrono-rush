@@ -1,14 +1,12 @@
 --[[
-    ChronoRush - Level Manager
-    Handles wave survival system with 10 levels
+    ChronoRush - Level Manager (Runner Mode)
+    Handles straight-path levels where player runs to the finish
     
-    Each level has:
-    - 3 waves of projectiles
-    - Break time between waves
-    - Increasing difficulty (faster spawns, more patterns)
-    
-    Win: Survive all waves in a level
-    Lose: Get hit by projectile
+    Game concept:
+    - Player moves forward on a straight path
+    - Projectiles fly from the front towards the player
+    - Reach the finish line to complete level
+    - Multiple levels with increasing length and difficulty
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -19,115 +17,105 @@ LevelManager.__index = LevelManager
 
 -- Level configuration
 local LEVEL_CONFIG = {
-    -- Level 1: Easy introduction
+    -- Level 1: Easy intro
     {
         name = "Level 1",
-        waveCount = 3,
-        waveDuration = 8,       -- seconds of projectiles per wave
-        waveBreak = 5,          -- seconds between waves
-        spawnInterval = 3.0,    -- time between projectile spawns
-        projectileSpeed = 40,    -- base projectile speed
-        patterns = {"single"},  -- allowed patterns
-        difficulty = 1
+        length = 100,          -- distance to finish (studs)
+        duration = 30,         -- max time to complete
+        projectileInterval = 1.5,
+        projectileSpeed = 50,
+        patterns = {"single"},
+        startDelay = 2
     },
-    -- Level 2: Introduce bursts
+    -- Level 2
     {
         name = "Level 2",
-        waveCount = 3,
-        waveDuration = 10,
-        waveBreak = 4,
-        spawnInterval = 2.5,
-        projectileSpeed = 45,
+        length = 150,
+        duration = 35,
+        projectileInterval = 1.2,
+        projectileSpeed = 55,
         patterns = {"single", "burst"},
-        difficulty = 2
+        startDelay = 2
     },
-    -- Level 3: Introduce aimed shots
+    -- Level 3
     {
         name = "Level 3",
-        waveCount = 3,
-        waveDuration = 12,
-        waveBreak = 4,
-        spawnInterval = 2.0,
-        projectileSpeed = 50,
-        patterns = {"single", "burst", "aimed"},
-        difficulty = 3
+        length = 180,
+        duration = 40,
+        projectileInterval = 1.0,
+        projectileSpeed = 60,
+        patterns = {"single", "burst"},
+        startDelay = 2
     },
-    -- Level 4: Introduce waves
+    -- Level 4
     {
         name = "Level 4",
-        waveCount = 3,
-        waveDuration = 12,
-        waveBreak = 3,
-        spawnInterval = 1.8,
-        projectileSpeed = 55,
-        patterns = {"single", "burst", "aimed", "wave"},
-        difficulty = 4
+        length = 200,
+        duration = 45,
+        projectileInterval = 0.8,
+        projectileSpeed = 65,
+        patterns = {"single", "burst", "aimed"},
+        startDelay = 2
     },
-    -- Level 5: Medium challenge
+    -- Level 5
     {
         name = "Level 5",
-        waveCount = 4,
-        waveDuration = 15,
-        waveBreak = 3,
-        spawnInterval = 1.5,
-        projectileSpeed = 60,
-        patterns = {"single", "burst", "aimed", "wave"},
-        difficulty = 5
+        length = 250,
+        duration = 50,
+        projectileInterval = 0.7,
+        projectileSpeed = 70,
+        patterns = {"burst", "aimed"},
+        startDelay = 2
     },
-    -- Level 6: Getting harder
+    -- Level 6
     {
         name = "Level 6",
-        waveCount = 4,
-        waveDuration = 15,
-        waveBreak = 2.5,
-        spawnInterval = 1.3,
-        projectileSpeed = 65,
-        patterns = {"burst", "aimed", "wave"},
-        difficulty = 6
+        length = 280,
+        duration = 55,
+        projectileInterval = 0.6,
+        projectileSpeed = 75,
+        patterns = {"burst", "aimed"},
+        startDelay = 2
     },
-    -- Level 7: High intensity
+    -- Level 7
     {
         name = "Level 7",
-        waveCount = 5,
-        waveDuration = 18,
-        waveBreak = 2,
-        spawnInterval = 1.0,
-        projectileSpeed = 70,
-        patterns = {"burst", "aimed", "wave"},
-        difficulty = 7
+        length = 300,
+        duration = 55,
+        projectileInterval = 0.5,
+        projectileSpeed = 80,
+        patterns = {"burst", "aimed"},
+        startDelay = 2
     },
-    -- Level 8: Very hard
+    -- Level 8
     {
         name = "Level 8",
-        waveCount = 5,
-        waveDuration = 18,
-        waveBreak = 2,
-        spawnInterval = 0.8,
-        projectileSpeed = 75,
-        patterns = {"burst", "aimed", "wave"},
-        difficulty = 8
+        length = 320,
+        duration = 60,
+        projectileInterval = 0.4,
+        projectileSpeed = 85,
+        patterns = {"burst", "aimed"},
+        startDelay = 2
     },
-    -- Level 9: Extreme
+    -- Level 9
     {
         name = "Level 9",
-        waveCount = 5,
-        waveDuration = 20,
-        waveBreak = 1.5,
-        spawnInterval = 0.6,
-        projectileSpeed = 80,
-        patterns = {"burst", "aimed", "wave"},
-        difficulty = 9
+        length = 350,
+        duration = 60,
+        projectileInterval = 0.35,
+        projectileSpeed = 90,
+        patterns = {"burst", "aimed"},
+        startDelay = 2
     },
-    -- Level 10: Final boss
+    -- Level 10: Final
     {
         name = "Level 10",
-        waveCount = 6,
-        waveDuration = 25,
-        waveBreak = 1,
-        spawnInterval = 0.4,
-        projectileSpeed = 90,
-        patterns = {"burst", "aimed", "wave"},
-        difficulty = 10
+        length = 400,
+        duration = 65,
+        projectileInterval = 0.3,
+        projectileSpeed = 95,
+        patterns = {"burst", "aimed"},
+        startDelay = 2
     }
 }
 
@@ -135,153 +123,152 @@ function LevelManager.new()
     local self = setmetatable({}, LevelManager)
     
     self.CurrentLevel = 1
-    self.CurrentWave = 0
-    self.IsWaveActive = false
+    self.IsRunning = false
     self.IsLevelComplete = false
     self.IsGameComplete = false
+    self.IsFailed = false
     
-    -- Timers
-    self.WaveTimer = 0
-    self.BreakTimer = 0
+    -- Player progress
+    self.PlayerZ = 0
+    self.LevelLength = 0
+    self.TimeRemaining = 0
+    
+    -- Spawn timer
     self.SpawnTimer = 0
     
     -- Callbacks
-    self.OnWaveStart = nil
-    self.OnWaveEnd = nil
     self.OnLevelStart = nil
     self.OnLevelComplete = nil
-    self.OnGameComplete = nil
     self.OnLevelFailed = nil
+    self.OnGameComplete = nil
+    self.OnProjectileSpawn = nil
+    self.OnProgress = nil
     
     return self
 end
 
 function LevelManager:Start()
-    print("Level Manager started - Level 1")
+    print("Level Manager started - Runner Mode")
 end
 
 function LevelManager:Reset()
     self.CurrentLevel = 1
-    self.CurrentWave = 0
-    self.IsWaveActive = false
+    self.IsRunning = false
     self.IsLevelComplete = false
     self.IsGameComplete = false
-    self.WaveTimer = 0
-    self.BreakTimer = 0
-    self.SpawnTimer = 0
-end
-
-function LevelManager:StartLevel()
-    if self.CurrentLevel > #LEVEL_CONFIG then
-        -- All levels complete!
-        self.IsGameComplete = true
-        if self.OnGameComplete then
-            self.OnGameComplete()
-        end
-        return
-    end
-    
-    self.CurrentWave = 0
-    self.IsLevelComplete = false
-    
-    local config = self:GetCurrentLevelConfig()
-    print("Starting " .. config.name .. " - " .. config.waveCount .. " waves")
-    
-    if self.OnLevelStart then
-        self.OnLevelStart(self.CurrentLevel, config)
-    end
-    
-    -- Start first wave after brief countdown
-    task.delay(2, function()
-        self:StartNextWave()
-    end)
-end
-
-function LevelManager:StartNextWave()
-    local config = self:GetCurrentLevelConfig()
-    
-    self.CurrentWave = self.CurrentWave + 1
-    
-    if self.CurrentWave > config.waveCount then
-        -- Level complete!
-        self.IsLevelComplete = true
-        print(config.name .. " complete!")
-        
-        if self.OnLevelComplete then
-            self.OnLevelComplete(self.CurrentLevel)
-        end
-        
-        return
-    end
-    
-    -- Start wave
-    self.IsWaveActive = true
-    self.WaveTimer = config.waveDuration
-    self.SpawnTimer = 0
-    
-    print("Wave " .. self.CurrentWave .. "/" .. config.waveCount .. " started!")
-    
-    if self.OnWaveStart then
-        self.OnWaveStart(self.CurrentWave, config.waveCount, config)
-    end
-end
-
-function LevelManager:EndWave()
-    self.IsWaveActive = false
-    self.BreakTimer = self:GetCurrentLevelConfig().waveBreak
-    
-    print("Wave " .. self.CurrentWave .. " ended - " .. self.BreakTimer .. "s break")
-    
-    if self.OnWaveEnd then
-        self.OnWaveEnd(self.CurrentWave)
-    end
-    
-    -- Schedule next wave
-    task.delay(self.BreakTimer, function()
-        self:StartNextWave()
-    end)
-end
-
-function LevelManager:Update(dt)
-    if self.IsGameComplete then return end
-    if self.IsLevelComplete then return end
-    
-    if self.IsWaveActive then
-        -- Update wave timer
-        self.WaveTimer = self.WaveTimer - dt
-        self.SpawnTimer = self.SpawnTimer + dt
-        
-        -- Check if wave should end
-        if self.WaveTimer <= 0 then
-            self:EndWave()
-        end
-    end
-end
-
-function LevelManager:ShouldSpawnProjectile()
-    if not self.IsWaveActive then return false end
-    
-    local config = self:GetCurrentLevelConfig()
-    
-    if self.SpawnTimer >= config.spawnInterval then
-        self.SpawnTimer = 0
-        return true
-    end
-    
-    return false
+    self.IsFailed = false
 end
 
 function LevelManager:GetCurrentLevelConfig()
     return LEVEL_CONFIG[self.CurrentLevel] or LEVEL_CONFIG[#LEVEL_CONFIG]
 end
 
-function LevelManager:GetCurrentPattern()
+function LevelManager:StartLevel()
+    if self.CurrentLevel > #LEVEL_CONFIG then
+        self.IsGameComplete = true
+        if self.OnGameComplete then
+            self.OnGameComplete()
+        end
+        return false
+    end
+    
+    local config = self:GetCurrentLevelConfig()
+    
+    self.IsRunning = true
+    self.IsLevelComplete = false
+    self.IsFailed = false
+    self.PlayerZ = 0
+    self.LevelLength = config.length
+    self.TimeRemaining = config.duration
+    self.SpawnTimer = 0
+    
+    print("Starting " .. config.name .. " - Distance: " .. config.length .. " studs")
+    
+    if self.OnLevelStart then
+        self.OnLevelStart(self.CurrentLevel, config)
+    end
+    
+    return true
+end
+
+function LevelManager:StopLevel()
+    self.IsRunning = false
+end
+
+function LevelManager:Update(dt)
+    if not self.IsRunning then return end
+    if self.IsLevelComplete or self.IsFailed then return end
+    
+    local config = self:GetCurrentLevelConfig()
+    
+    -- Update timer
+    self.TimeRemaining = self.TimeRemaining - dt
+    
+    -- Check timeout
+    if self.TimeRemaining <= 0 then
+        self:LevelFailed()
+        return
+    end
+    
+    -- Spawn projectiles
+    self.SpawnTimer = self.SpawnTimer + dt
+    if self.SpawnTimer >= config.projectileInterval then
+        self.SpawnTimer = 0
+        self:SpawnProjectile()
+    end
+    
+    -- Check progress
+    if self.OnProgress then
+        self.OnProgress(self.PlayerZ, self.LevelLength)
+    end
+end
+
+function LevelManager:UpdatePlayerPosition(z)
+    self.PlayerZ = z
+    
+    -- Check if reached finish
+    if self.PlayerZ >= self.LevelLength then
+        self:LevelComplete()
+    end
+    
+    -- Check progress
+    if self.OnProgress then
+        self.OnProgress(self.PlayerZ, self.LevelLength)
+    end
+end
+
+function LevelManager:SpawnProjectile()
+    if not self.IsRunning then return end
+    
     local config = self:GetCurrentLevelConfig()
     local patterns = config.patterns
+    local pattern = patterns[math.random(1, #patterns)]
     
-    -- Random pattern from allowed patterns
-    local randomIndex = math.random(1, #patterns)
-    return patterns[randomIndex]
+    if self.OnProjectileSpawn then
+        self.OnProjectileSpawn(pattern, config.projectileSpeed, self.PlayerZ, self.LevelLength)
+    end
+end
+
+function LevelManager:LevelComplete()
+    self.IsRunning = false
+    self.IsLevelComplete = true
+    
+    print("Level " .. self.CurrentLevel .. " complete!")
+    
+    if self.OnLevelComplete then
+        self.OnLevelComplete(self.CurrentLevel)
+    end
+end
+
+function LevelManager:LevelFailed()
+    self.IsRunning = false
+    self.IsFailed = true
+    
+    print("Level " .. self.CurrentLevel .. " failed!")
+    
+    if self.OnLevelFailed then
+        self.OnLevelFailed(self.CurrentLevel)
+    end
 end
 
 function LevelManager:AdvanceToNextLevel()
@@ -293,33 +280,25 @@ function LevelManager:AdvanceToNextLevel()
             self.OnGameComplete()
         end
     else
-        -- Reset for next level
-        task.delay(3, function()
+        task.delay(2, function()
             self:StartLevel()
         end)
     end
 end
 
-function LevelManager:OnPlayerHit()
-    -- Player failed this level
-    print("Hit! Level failed")
-    
-    if self.OnLevelFailed then
-        self.OnLevelFailed(self.CurrentLevel)
-    end
+function LevelManager:RetryLevel()
+    task.delay(1, function()
+        self:StartLevel()
+    end)
 end
 
-function LevelManager:GetStatus()
-    return {
-        level = self.CurrentLevel,
-        wave = self.CurrentWave,
-        totalWaves = self:GetCurrentLevelConfig().waveCount,
-        isWaveActive = self.IsWaveActive,
-        isLevelComplete = self.IsLevelComplete,
-        isGameComplete = self.IsGameComplete,
-        waveTimeLeft = self.WaveTimer,
-        breakTimeLeft = self.BreakTimer
-    }
+function LevelManager:GetProgress()
+    if self.LevelLength <= 0 then return 0 end
+    return math.clamp(self.PlayerZ / self.LevelLength, 0, 1)
+end
+
+function LevelManager:GetTimeRemaining()
+    return self.TimeRemaining
 end
 
 function LevelManager:IsLastLevel()

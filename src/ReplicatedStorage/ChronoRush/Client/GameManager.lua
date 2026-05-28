@@ -1,12 +1,11 @@
 --[[
-    ChronoRush - Game Manager (Client)
-    Main game loop, state management, and module coordination
+    ChronoRush - Game Manager (Runner Mode)
+    Main game loop for runner-style gameplay
     
-    Wave Survival Game Mode:
-    - 10 levels with 3-6 waves each
-    - Survive all waves to complete level
-    - Progress to next level on success
-    - Retry same level on failure
+    - Player runs forward on a straight path
+    - Projectiles fly from the front
+    - Reach finish line to complete level
+    - 10 levels with increasing difficulty
 ]]
 
 local Players = game:GetService("Players")
@@ -15,12 +14,11 @@ local UserInputService = game:GetService("UserInputService")
 
 local ChronoRushClient = ReplicatedStorage:WaitForChild("ChronoRush"):WaitForChild("Client")
 
-local Movement = require(ChronoRushClient:WaitForChild("Movement"))
 local Jump = require(ChronoRushClient:WaitForChild("Jump"))
 local Dash = require(ChronoRushClient:WaitForChild("Dash"))
 local Combo = require(ChronoRushClient:WaitForChild("Combo"))
 local ProjectileManager = require(ChronoRushClient:WaitForChild("ProjectileManager"))
-local CameraController = require(ChronoRushClient:WaitForChild("CameraController"))
+local RunnerController = require(ChronoRushClient:WaitForChild("RunnerController"))
 local UIManager = require(ChronoRushClient:WaitForChild("UIManager"))
 
 local GameManager = {}
@@ -34,23 +32,20 @@ function GameManager.new()
     
     -- Game state
     self.IsPlaying = false
-    self.IsPaused = false
     self.IsGameOver = false
     
     -- Modules
-    self.Movement = nil
+    self.RunnerController = nil
     self.Jump = nil
     self.Dash = nil
     self.Combo = nil
     self.ProjectileManager = nil
-    self.CameraController = nil
     self.UI = nil
     
     return self
 end
 
 function GameManager:Start()
-    -- Wait for character
     self.Player.CharacterAdded:Connect(function(char)
         self:OnCharacterAdded(char)
     end)
@@ -59,10 +54,8 @@ function GameManager:Start()
         self:OnCharacterAdded(self.Player.Character)
     end
     
-    -- Input handlers
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then return end
-        
         if input.KeyCode == Enum.KeyCode.Escape then
             self:TogglePause()
         end
@@ -71,77 +64,52 @@ end
 
 function GameManager:OnCharacterAdded(character)
     self.Character = character
-    
     self:InitializeModules()
 end
 
 function GameManager:InitializeModules()
     if not self.Character then return end
     
-    -- Create UI first
+    -- Create UI
     self.UI = UIManager.new()
     self.UI:Create()
     
-    -- Initialize game modules
-    self.Movement = Movement.new(self.Character)
-    self.Movement:Start()
+    -- Runner Controller (handles movement)
+    self.RunnerController = RunnerController.new(self.Character)
+    self.RunnerController:Start()
     
+    -- Notify position updates to projectile manager
+    self.RunnerController.OnPositionUpdate = function(z)
+        if self.ProjectileManager then
+            self.ProjectileManager:UpdatePlayerPosition(z)
+        end
+    end
+    
+    -- Jump
     self.Jump = Jump.new(self.Character)
     self.Jump:Start()
     
+    -- Dash
     self.Dash = Dash.new(self.Character)
     self.Dash:Start()
     
+    -- Combo
     self.Combo = Combo.new()
     self.Combo:Start()
     
-    self.CameraController = CameraController.new()
-    self.CameraController:Start()
-    
+    -- Projectile Manager
     self.ProjectileManager = ProjectileManager.new()
     self.ProjectileManager:Start()
-    
-    -- Set up hit detection
-    self:SetupHitDetection()
     
     -- Set up level callbacks
     self:SetupLevelCallbacks()
     
-    -- Start game automatically after brief delay
+    -- Hit detection
+    self:SetupHitDetection()
+    
+    -- Start game after delay
     task.delay(2, function()
         self:StartGame()
-    end)
-end
-
-function GameManager:SetupHitDetection()
-    if not self.Character then return end
-    
-    local humanoid = self.Character:WaitForChild("Humanoid")
-    local rootPart = self.Character:WaitForChild("HumanoidRootPart")
-    
-    -- Create invisible hitbox
-    local hitbox = Instance.new("Part")
-    hitbox.Name = "Hitbox"
-    hitbox.Size = Vector3.new(4, 4, 4)
-    hitbox.Shape = Enum.PartType.Ball
-    hitbox.Anchored = false
-    hitbox.CanCollide = false
-    hitbox.Transparency = 1
-    hitbox.Material = Enum.Material.Plastic
-    hitbox.Color = Color3.new(0, 0, 0)
-    hitbox.Parent = rootPart
-    
-    local weld = Instance.new("Weld")
-    weld.Part0 = rootPart
-    weld.Part1 = hitbox
-    weld.Parent = hitbox
-    
-    -- Touch detection
-    hitbox.Touched:Connect(function(otherPart)
-        if otherPart.Name == "Projectile" then
-            self:OnPlayerHit()
-            otherPart:Destroy()
-        end
     end)
 end
 
@@ -150,16 +118,8 @@ function GameManager:SetupLevelCallbacks()
     
     local lm = self.ProjectileManager.LevelManager
     
-    lm.OnLevelStart = function(level)
-        self:OnLevelStart(level)
-    end
-    
-    lm.OnWaveStart = function(wave, total)
-        self:OnWaveStart(wave, total)
-    end
-    
-    lm.OnWaveEnd = function(wave)
-        self:OnWaveEnd(wave)
+    lm.OnLevelStart = function(level, config)
+        self:OnLevelStart(level, config)
     end
     
     lm.OnLevelComplete = function(level)
@@ -173,6 +133,40 @@ function GameManager:SetupLevelCallbacks()
     lm.OnGameComplete = function()
         self:OnGameComplete()
     end
+    
+    lm.OnProgress = function(playerZ, levelLength)
+        self:OnProgress(playerZ, levelLength)
+    end
+end
+
+function GameManager:SetupHitDetection()
+    if not self.Character then return end
+    
+    local rootPart = self.Character:WaitForChild("HumanoidRootPart")
+    
+    -- Create invisible hitbox
+    local hitbox = Instance.new("Part")
+    hitbox.Name = "Hitbox"
+    hitbox.Size = Vector3.new(4, 4, 4)
+    hitbox.Shape = Enum.PartShape.Ball
+    hitbox.Anchored = false
+    hitbox.CanCollide = false
+    hitbox.Transparency = 1
+    hitbox.Material = Enum.Material.Plastic
+    hitbox.Color = Color3.new(0, 0, 0)
+    hitbox.Parent = rootPart
+    
+    local weld = Instance.new("Weld")
+    weld.Part0 = rootPart
+    weld.Part1 = hitbox
+    weld.Parent = hitbox
+    
+    hitbox.Touched:Connect(function(otherPart)
+        if otherPart.Name == "Projectile" then
+            self:OnPlayerHit()
+            otherPart:Destroy()
+        end
+    end)
 end
 
 function GameManager:StartGame()
@@ -184,39 +178,45 @@ function GameManager:StartGame()
         self.ProjectileManager:StartGame()
     end
     
-    if self.Combo then
-        self.Combo:Reset()
-    end
-    
-    print("=== GAME STARTED ===")
-    print("Controls: WASD=Move, Space=Jump, Q=Dash, Shift=Camera Lock, Scroll=Zoom")
+    print("=== RUNNER GAME STARTED ===")
+    print("Controls: WASD=Move, Space=Jump, Q=Dash")
+    print("Goal: Reach the finish line!")
 end
 
-function GameManager:OnLevelStart(level)
+function GameManager:OnLevelStart(level, config)
     local totalLevels = self.ProjectileManager.LevelManager:GetTotalLevels()
     self.UI:UpdateLevel(level, totalLevels)
-    self.UI:ShowLevelStart(level)
+    self.UI:ShowMessage("Level " .. level .. "\nDistance: " .. config.length .. "m", 2, Color3.fromRGB(100, 255, 200))
+    self.UI:UpdateProgress(0)
+    
+    -- Update camera zoom for runner view
+    self.Player.CameraMinZoomDistance = 15
+    self.Player.CameraMaxZoomDistance = 20
 end
 
-function GameManager:OnWaveStart(wave, total)
-    self.UI:UpdateWave(wave, total)
-    self.UI:ShowWaveStart(wave, total)
-end
-
-function GameManager:OnWaveEnd(wave)
-    -- Show break message
-    print("Wave " .. wave .. " cleared! Next wave coming...")
+function GameManager:OnProgress(playerZ, levelLength)
+    local progress = math.clamp(playerZ / levelLength, 0, 1)
+    self.UI:UpdateProgress(progress)
+    
+    -- Update timer
+    if self.ProjectileManager and self.ProjectileManager.LevelManager then
+        local timeRemaining = self.ProjectileManager.LevelManager:GetTimeRemaining()
+        self.UI:UpdateTimer(timeRemaining)
+    end
 end
 
 function GameManager:OnLevelComplete(level)
-    self.UI:ShowLevelComplete(level)
+    self.UI:ShowMessage("Level " .. level .. " Complete!", 2, Color3.fromRGB(100, 255, 100))
     
-    -- Clear combo (survived!)
     if self.Combo then
         self.Combo:BreakCombo()
     end
     
-    -- Advance to next level
+    -- Clear projectiles and advance
+    if self.ProjectileManager then
+        self.ProjectileManager:ClearAllProjectiles()
+    end
+    
     task.delay(3, function()
         if self.ProjectileManager and self.ProjectileManager.LevelManager then
             self.ProjectileManager.LevelManager:AdvanceToNextLevel()
@@ -225,21 +225,18 @@ function GameManager:OnLevelComplete(level)
 end
 
 function GameManager:OnLevelFailed(level)
-    self.UI:ShowGameOver(level)
+    self.UI:ShowMessage("Hit! Try Again", 2, Color3.fromRGB(255, 100, 100))
     
-    -- Clear combo
     if self.Combo then
         self.Combo:BreakCombo()
     end
     
-    -- End game
     self:EndGame(level)
 end
 
 function GameManager:OnGameComplete()
-    self.UI:ShowGameComplete()
+    self.UI:ShowMessage("🎉 VICTORY! 🎉\nAll levels complete!", 4, Color3.fromRGB(255, 215, 0))
     
-    -- Show victory screen
     self:ShowVictoryScreen()
     
     self.IsPlaying = false
@@ -249,33 +246,28 @@ end
 function GameManager:OnPlayerHit()
     if not self.IsPlaying then return end
     
-    -- Break combo
     if self.Combo then
         self.Combo:BreakCombo()
     end
     
-    -- Trigger level failed
     if self.ProjectileManager and self.ProjectileManager.LevelManager then
-        self.ProjectileManager.LevelManager:OnPlayerHit()
+        self.ProjectileManager.LevelManager:LevelFailed()
     end
 end
 
 function GameManager:EndGame(failedLevel)
     self.IsPlaying = false
     
-    -- Clear projectiles
     if self.ProjectileManager then
         self.ProjectileManager:StopGame()
     end
     
-    -- Show game over screen
     self:ShowGameOver(failedLevel or 1)
 end
 
-function GameManager:ShowGameOver(failedLevel)
+function GameManager:ShowGameOver(level)
     local playerGui = self.Player:WaitForChild("PlayerGui")
     
-    -- Remove existing UI if any
     local existing = playerGui:FindFirstChild("GameOverScreen")
     if existing then existing:Destroy() end
     
@@ -309,7 +301,7 @@ function GameManager:ShowGameOver(failedLevel)
     subTitle.Position = UDim2.new(0, 0, 0.4, 0)
     subTitle.BackgroundTransparency = 1
     subTitle.Font = Enum.Font.GothamMedium
-    subTitle.Text = "Failed at Level " .. tostring(failedLevel)
+    subTitle.Text = "Failed at Level " .. tostring(level)
     subTitle.TextColor3 = Color3.fromRGB(200, 200, 200)
     subTitle.TextSize = 28
     subTitle.Parent = frame
@@ -395,28 +387,24 @@ function GameManager:ShowVictoryScreen()
 end
 
 function GameManager:RestartGame()
-    -- Reset game state
     self.IsGameOver = false
     self.IsPlaying = false
     
-    -- Clear old UI
+    -- Clear UI
     if self.UI then
         self.UI:Destroy()
     end
-    
-    -- Recreate UI
     self.UI = UIManager.new()
     self.UI:Create()
     
-    -- Restart game
+    -- Restart
     task.delay(1, function()
         self:StartGame()
     end)
 end
 
 function GameManager:TogglePause()
-    self.IsPaused = not self.IsPaused
-    -- TODO: Implement pause menu
+    -- TODO
 end
 
 function GameManager:Destroy()
@@ -426,8 +414,8 @@ function GameManager:Destroy()
     if self.UI then
         self.UI:Destroy()
     end
-    if self.CameraController then
-        self.CameraController:Destroy()
+    if self.RunnerController then
+        self.RunnerController:Destroy()
     end
 end
 
