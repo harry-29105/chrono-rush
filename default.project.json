@@ -1,0 +1,18 @@
+{
+    "name": "chrono-rush",
+    "tree": {
+        "$className": "DataModel",
+        "ReplicatedStorage": {
+            "$className": "ReplicatedStorage",
+            "ChronoRush": {
+                "$path": "src/ReplicatedStorage/ChronoRush"
+            }
+        },
+        "Workspace": {
+            "$className": "Workspace",
+            "ChronoRush": {
+                "$path": "src/Workspace/ChronoRush"
+            }
+        }
+    }
+}
