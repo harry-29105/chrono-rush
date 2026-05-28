@@ -67,25 +67,25 @@ function CameraController:ToggleShiftLock()
     self.RotateWithCamera = self.IsShiftLockEnabled
     
     if self.IsShiftLockEnabled then
-        -- Lock cursor to center - camera rotates freely without RMB
-        -- MiddleClick allows mouse look without zooming in to FPS
+        -- Lock cursor to center - camera rotates freely without needing RMB
+        -- LockCenter keeps cursor locked while allowing zoom
         self.Player.CameraMode = Enum.CameraMode.Classic
-        UserInputService.MouseBehavior = Enum.MouseBehavior.MiddleClick
+        UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
         
-        -- Set comfortable zoom distance for locked camera
-        self.Player.CameraMinZoomDistance = 25
-        self.Player.CameraMaxZoomDistance = 25
+        -- Set comfortable zoom distance for locked camera (3rd person, not FPS)
+        self.Player.CameraMinZoomDistance = 20
+        self.Player.CameraMaxZoomDistance = 20
     else
-        -- Release - allow free mouse look and zoom
+        -- Release - cursor free, normal camera
         self.Player.CameraMode = Enum.CameraMode.Classic
         UserInputService.MouseBehavior = Enum.MouseBehavior.Default
         
-        -- Reset to default zoom
-        self.Player.CameraMinZoomDistance = 10
+        -- Reset zoom range for normal play
+        self.Player.CameraMinZoomDistance = 0.5
         self.Player.CameraMaxZoomDistance = 128
     end
     
-    print("Shift Lock: " .. (self.IsShiftLockEnabled and "ON" or "OFF"))
+    print("Shift Lock: " .. (self.IsShiftLockEnabled and "ON (cursor locked)" or "OFF"))
 end
 
 function CameraController:HandleZoom(scrollDelta)
