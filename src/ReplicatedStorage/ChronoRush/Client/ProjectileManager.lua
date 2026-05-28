@@ -1,52 +1,72 @@
 --[[
     ChronoRush - Projectile Manager (Client)
-    Spawns and manages projectiles with multiple patterns
-    Phase 2: Burst, Aimed, and Wave patterns
+    Spawns projectiles based on level/wave configuration
+    Works with LevelManager to control difficulty
 ]]
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ChronoRushClient = ReplicatedStorage:WaitForChild("ChronoRush"):WaitForChild("Client")
+
 local Constants = require(ReplicatedStorage:WaitForChild("ChronoRush"):WaitForChild("Shared"):WaitForChild("Constants"))
+local LevelManager = require(ChronoRushClient:WaitForChild("LevelManager"))
 
 local ProjectileManager = {}
 ProjectileManager.__index = ProjectileManager
 
--- Pattern types
-local PatternType = {
-    SINGLE = "single",
-    BURST = "burst",      -- 3 projectiles at once
-    AIMED = "aimed",      -- targets player position
-    WAVE = "wave"         -- line of projectiles across arena
+-- Pattern type mapping
+local PATTERN_MAP = {
+    single = "SINGLE",
+    burst = "BURST",
+    aimed = "AIMED",
+    wave = "WAVE"
 }
 
 function ProjectileManager.new()
     local self = setmetatable({}, ProjectileManager)
     
     self.Projectiles = {}
-    self.SpawnTimer = 0
-    self.SpawnInterval = Constants.PROJECTILE_SPAWN_INTERVAL
-    self.DifficultyTimer = 0
     self.IsActive = false
+    self.LevelManager = nil
     
-    -- Difficulty settings
-    self.DifficultyLevel = 1
-    self.MaxProjectileSpeed = Constants.PROJECTILE_SPEED
-    self.PatternWeights = {
-        [PatternType.SINGLE] = 100, -- Most common
-        [PatternType.BURST] = 50,
-        [PatternType.AIMED] = 30,
-        [PatternType.WAVE] = 20
-    }
-    
-    -- Wave pattern state
-    self.WaveCounter = 0
+    -- Track current difficulty from level
+    self.CurrentSpeed = Constants.PROJECTILE_SPEED
     
     return self
 end
 
 function ProjectileManager:Start()
+    -- Create LevelManager
+    self.LevelManager = LevelManager.new()
+    self.LevelManager:Start()
+    
+    -- Set up callbacks
+    self.LevelManager.OnLevelStart = function(level, config)
+        self:OnLevelStart(level, config)
+    end
+    
+    self.LevelManager.OnWaveStart = function(wave, total, config)
+        self:OnWaveStart(wave, total, config)
+    end
+    
+    self.LevelManager.OnWaveEnd = function(wave)
+        self:OnWaveEnd(wave)
+    end
+    
+    self.LevelManager.OnLevelComplete = function(level)
+        self:OnLevelComplete(level)
+    end
+    
+    self.LevelManager.OnGameComplete = function()
+        self:OnGameComplete()
+    end
+    
+    self.LevelManager.OnLevelFailed = function(level)
+        self:OnLevelFailed(level)
+    end
+    
     -- Update loop
     self.Connection = RunService.Heartbeat:Connect(function(dt)
         self:Update(dt)
@@ -55,89 +75,66 @@ end
 
 function ProjectileManager:StartGame()
     self.IsActive = true
-    self.SpawnTimer = 0
-    self.DifficultyTimer = 0
-    self.DifficultyLevel = 1
     self.Projectiles = {}
-    self.WaveCounter = 0
-    self.SpawnInterval = Constants.PROJECTILE_SPAWN_INTERVAL
+    self.LevelManager:Reset()
+    self.LevelManager:StartLevel()
 end
 
 function ProjectileManager:StopGame()
     self.IsActive = false
-    
-    -- Clear all projectiles
-    for _, proj in ipairs(self.Projectiles) do
-        if proj and proj.Parent then
-            proj:Destroy()
-        end
-    end
-    self.Projectiles = {}
+    self:ClearAllProjectiles()
 end
 
 function ProjectileManager:Update(dt)
     if not self.IsActive then return end
+    if not self.LevelManager then return end
     
-    -- Spawn timer
-    self.SpawnTimer = self.SpawnTimer + dt
-    if self.SpawnTimer >= self.SpawnInterval then
-        self:SpawnProjectilePattern()
-        self.SpawnTimer = 0
+    -- Update level manager
+    self.LevelManager:Update(dt)
+    
+    -- Check if we should spawn
+    if self.LevelManager:ShouldSpawnProjectile() then
+        self:SpawnProjectileFromPattern()
     end
     
-    -- Difficulty scaling every 10 seconds
-    self.DifficultyTimer = self.DifficultyTimer + dt
-    if self.DifficultyTimer >= 10 then
-        self:IncreaseDifficulty()
-        self.DifficultyTimer = 0
-    end
-    
-    -- Update projectile positions
+    -- Cleanup
     self:CleanupProjectiles()
 end
 
-function ProjectileManager:IncreaseDifficulty()
-    self.DifficultyLevel = self.DifficultyLevel + 1
-    
-    -- Decrease spawn interval (more projectiles)
-    self.SpawnInterval = math.max(
-        Constants.PROJECTILE_SPAWN_INTERVAL_MIN,
-        Constants.PROJECTILE_SPAWN_INTERVAL - (self.DifficultyLevel * 0.1)
-    )
-    
-    -- Increase projectile speed slightly
-    self.MaxProjectileSpeed = Constants.PROJECTILE_SPEED + (self.DifficultyLevel * 3)
-    
-    -- Adjust pattern weights to favor harder patterns
-    self.PatternWeights[PatternType.SINGLE] = math.max(30, 100 - self.DifficultyLevel * 5)
-    self.PatternWeights[PatternType.BURST] = math.max(20, 50 + self.DifficultyLevel * 2)
-    self.PatternWeights[PatternType.AIMED] = math.max(20, 30 + self.DifficultyLevel * 3)
-    self.PatternWeights[PatternType.WAVE] = math.max(10, 20 + self.DifficultyLevel * 2)
-    
-    print("Difficulty increased to level " .. self.DifficultyLevel .. "! Spawn interval: " .. string.format("%.2f", self.SpawnInterval))
+function ProjectileManager:OnLevelStart(level, config)
+    self.CurrentSpeed = config.projectileSpeed
+    print("ProjectileManager: Level " .. level .. " started, speed=" .. config.projectileSpeed)
 end
 
-function ProjectileManager:SelectPattern()
-    -- Weighted random selection
-    local totalWeight = 0
-    for _, weight in pairs(self.PatternWeights) do
-        totalWeight = totalWeight + weight
-    end
-    
-    local randomValue = math.random() * totalWeight
-    local cumulativeWeight = 0
-    
-    for patternType, weight in pairs(self.PatternWeights) do
-        cumulativeWeight = cumulativeWeight + weight
-        if randomValue <= cumulativeWeight then
-            return patternType
-        end
-    end
-    
-    return PatternType.SINGLE -- Default
+function ProjectileManager:OnWaveStart(wave, total, config)
+    print("ProjectileManager: Wave " .. wave .. " started")
 end
 
-function ProjectileManager:SpawnProjectilePattern()
+function ProjectileManager:OnWaveEnd(wave)
+    -- Clear projectiles during break
+    self:ClearAllProjectiles()
+    print("ProjectileManager: Wave " .. wave .. " ended, clearing projectiles")
+end
+
+function ProjectileManager:OnLevelComplete(level)
+    -- Clear all projectiles
+    self:ClearAllProjectiles()
+end
+
+function ProjectileManager:OnGameComplete()
+    self:ClearAllProjectiles()
+end
+
+function ProjectileManager:OnLevelFailed(level)
+    self:ClearAllProjectiles()
+end
+
+function ProjectileManager:SpawnProjectileFromPattern()
+    if not self.LevelManager then return end
+    
+    local patternName = self.LevelManager:GetCurrentPattern()
+    local patternType = PATTERN_MAP[patternName] or "SINGLE"
+    
     local player = Players.LocalPlayer
     local character = player.Character
     if not character then return end
@@ -146,15 +143,14 @@ function ProjectileManager:SpawnProjectilePattern()
     if not rootPart then return end
     
     local playerPos = rootPart.Position
-    local patternType = self:SelectPattern()
     
-    print("Spawning pattern: " .. patternType)
+    print("Spawning: " .. patternType)
     
-    if patternType == PatternType.BURST then
+    if patternType == "BURST" then
         self:SpawnBurstPattern(playerPos)
-    elseif patternType == PatternType.AIMED then
+    elseif patternType == "AIMED" then
         self:SpawnAimedPattern(playerPos)
-    elseif patternType == PatternType.WAVE then
+    elseif patternType == "WAVE" then
         self:SpawnWavePattern(playerPos)
     else
         self:SpawnSingleProjectile(playerPos)
@@ -162,7 +158,6 @@ function ProjectileManager:SpawnProjectilePattern()
 end
 
 function ProjectileManager:SpawnSingleProjectile(playerPos)
-    -- Random spawn position around player
     local angle = math.random() * math.pi * 2
     local distance = 80 + math.random() * 40
     
@@ -173,11 +168,10 @@ function ProjectileManager:SpawnSingleProjectile(playerPos)
     )
     
     local direction = (playerPos - spawnPos).Unit
-    self:CreateProjectile(spawnPos, direction, Constants.PROJECTILE_SPEED, false)
+    self:CreateProjectile(spawnPos, direction, self.CurrentSpeed, false)
 end
 
 function ProjectileManager:SpawnBurstPattern(playerPos)
-    -- Spawn 3 projectiles in a fan pattern
     local angle = math.random() * math.pi * 2
     local distance = 80 + math.random() * 20
     
@@ -187,10 +181,7 @@ function ProjectileManager:SpawnBurstPattern(playerPos)
         math.sin(angle) * distance
     )
     
-    -- Direction to player
     local baseDir = (playerPos - basePos).Unit
-    
-    -- Fan spread angle (30 degrees total)
     local spreadAngle = math.rad(30)
     
     for i = -1, 1 do
@@ -198,13 +189,12 @@ function ProjectileManager:SpawnBurstPattern(playerPos)
         local rotatedDir = self:RotateVector(baseDir, angleOffset)
         local spawnPos = basePos + Vector3.new(0, 0, 0)
         
-        self:CreateProjectile(spawnPos, rotatedDir, self.MaxProjectileSpeed, true)
-        task.wait(0.05) -- Slight delay between each
+        self:CreateProjectile(spawnPos, rotatedDir, self.CurrentSpeed, true)
+        task.wait(0.05)
     end
 end
 
 function ProjectileManager:SpawnAimedPattern(playerPos)
-    -- Spawn from random direction but aimed exactly at player
     local angle = math.random() * math.pi * 2
     local distance = 100 + math.random() * 30
     
@@ -214,22 +204,15 @@ function ProjectileManager:SpawnAimedPattern(playerPos)
         math.sin(angle) * distance
     )
     
-    -- Always aimed at player (faster projectile)
     local direction = (playerPos - spawnPos).Unit
-    self:CreateProjectile(spawnPos, direction, self.MaxProjectileSpeed * 1.3, true)
+    self:CreateProjectile(spawnPos, direction, self.CurrentSpeed * 1.3, true)
 end
 
 function ProjectileManager:SpawnWavePattern(playerPos)
-    -- Line of projectiles across the arena
-    self.WaveCounter = self.WaveCounter + 1
-    
-    -- Wave direction (alternates)
-    local waveDir = (self.WaveCounter % 2 == 0) and 1 or -1
-    
-    -- Spawn a line of projectiles perpendicular to wave direction
+    local waveDir = math.random() > 0.5 and 1 or -1
     local centerPos = playerPos + Vector3.new(0, 0, waveDir * 100)
     
-    local projectileCount = 5 + math.min(self.DifficultyLevel, 3)
+    local projectileCount = 5 + math.random(0, 2)
     local spacing = 15
     
     for i = 1, projectileCount do
@@ -237,13 +220,12 @@ function ProjectileManager:SpawnWavePattern(playerPos)
         local spawnPos = centerPos + Vector3.new(offset, math.random(-5, 5), 0)
         local direction = Vector3.new(0, 0, -waveDir).Unit
         
-        self:CreateProjectile(spawnPos, direction, self.MaxProjectileSpeed * 0.8, false)
+        self:CreateProjectile(spawnPos, direction, self.CurrentSpeed * 0.8, false)
         task.wait(0.08)
     end
 end
 
 function ProjectileManager:RotateVector(vec, angle)
-    -- Rotate vector around Y axis
     local cos = math.cos(angle)
     local sin = math.sin(angle)
     return Vector3.new(
@@ -262,31 +244,29 @@ function ProjectileManager:CreateProjectile(position, direction, speed, isDanger
     projectile.Anchored = true
     projectile.CanCollide = false
     
-    -- Neon material for glow
     projectile.Material = Enum.Material.Neon
     
-    -- Color based on speed
     if isDangerous then
         projectile.Color = Constants.COLOR_PROJECTILE_FAST
     else
         projectile.Color = Constants.COLOR_PROJECTILE_SLOW
     end
     
-    -- Point in direction of travel
     local lookAt = position + direction
     projectile.CFrame = CFrame.new(position, lookAt)
     
     projectile.Parent = workspace
     
-    -- Add movement script
+    -- Movement script
     local speedValue = speed
-    local directionValue = direction
+    local dirX, dirY, dirZ = direction.X, direction.Y, direction.Z
     
     local moveScript = Instance.new("Script")
     moveScript.Source = [[
         local RunService = game:GetService("RunService")
         local speed = ]] .. speedValue .. [[
-        local direction = ]] .. tostring(direction) .. [[
+        local dirX, dirY, dirZ = ]] .. dirX .. [[, ]] .. dirY .. [[, ]] .. dirZ .. [[
+        local direction = Vector3.new(dirX, dirY, dirZ)
         local active = true
         local lifetime = 0
         
@@ -302,7 +282,6 @@ function ProjectileManager:CreateProjectile(position, direction, speed, isDanger
             
             script.Parent.Position = script.Parent.Position + direction * speed * dt
             
-            -- Remove if too old or too far
             if lifetime > 8 then
                 active = false
                 script.Parent:Destroy()
@@ -324,20 +303,16 @@ function ProjectileManager:CreateProjectile(position, direction, speed, isDanger
         
         script.Parent.Destroying:Connect(function()
             active = false
-            if connection then
-                connection:Disconnect()
-            end
+            if connection then connection:Disconnect() end
         end)
     ]]
     moveScript.Disabled = false
     moveScript.Parent = projectile
     
-    -- Track projectile
     table.insert(self.Projectiles, projectile)
 end
 
 function ProjectileManager:CleanupProjectiles()
-    -- Remove destroyed projectiles from tracking
     local alive = {}
     for _, proj in ipairs(self.Projectiles) do
         if proj and proj.Parent then
@@ -347,11 +322,23 @@ function ProjectileManager:CleanupProjectiles()
     self.Projectiles = alive
 end
 
+function ProjectileManager:ClearAllProjectiles()
+    for _, proj in ipairs(self.Projectiles) do
+        if proj and proj.Parent then
+            proj:Destroy()
+        end
+    end
+    self.Projectiles = {}
+end
+
 function ProjectileManager:Destroy()
     if self.Connection then
         self.Connection:Disconnect()
     end
-    self:StopGame()
+    if self.LevelManager then
+        self.LevelManager = nil
+    end
+    self:ClearAllProjectiles()
 end
 
 return ProjectileManager
