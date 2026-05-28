@@ -2,11 +2,8 @@
     ChronoRush - Camera Controller
     Handles camera-relative movement, Shift lock toggle, and character rotation
     
-    Shift Lock: Locks cursor to center so camera rotates without RMB
-    Character Rotation:
-    - Shift OFF: Character faces movement direction (WASD)
-    - Shift ON: Character faces camera direction
-    Scroll Wheel: Always works for zoom (3rd person <-> closer)
+    Smooth scroll zoom - no fixed steps, continuous control
+    Scroll up = zoom in | Scroll down = zoom out
 ]]
 
 local Players = game:GetService("Players")
@@ -22,17 +19,21 @@ function CameraController.new()
     self.Player = Players.LocalPlayer
     self.Camera = workspace.CurrentCamera
     
-    -- Shift lock state (cursor locked to center, camera rotates freely)
+    -- Shift lock state
     self.IsShiftLockEnabled = false
+    self.RotateWithCamera = false
     
-    -- Character rotation mode
-    self.RotateWithCamera = false -- True when shift lock is on
+    -- Smooth zoom settings
+    self.MinZoom = 0.5   -- Maximum zoom in (FPS view)
+    self.MaxZoom = 80    -- Maximum zoom out (limited as requested)
     
-    -- Camera zoom settings
-    self.MinZoom = 10  -- Closest zoom (FPS-ish)
-    self.MaxZoom = 60  -- Farthest zoom (full 3rd person)
-    self.ZoomStep = 5   -- Scroll wheel step size
-    self.DefaultZoom = 35
+    -- Current zoom state
+    self.TargetZoom = 35 -- Default starting zoom
+    self.CurrentZoom = 35
+    self.ZoomSpeed = 10  -- How fast to interpolate to target zoom
+    
+    -- Scroll sensitivity
+    self.ScrollSensitivity = 0.5 -- Zoom per scroll tick
     
     return self
 end
@@ -47,7 +48,7 @@ function CameraController:Start()
         end
     end)
     
-    -- Listen for scroll wheel zoom (always works!)
+    -- Listen for scroll wheel (smooth continuous zoom)
     UserInputService.InputChanged:Connect(function(input, gameProcessed)
         if gameProcessed then return end
         
@@ -56,7 +57,7 @@ function CameraController:Start()
         end
     end)
     
-    -- Update loop - handle character rotation
+    -- Update loop - smooth zoom interpolation
     self.Connection = RunService.RenderStepped:Connect(function(dt)
         self:Update(dt)
     end)
@@ -67,64 +68,63 @@ function CameraController:ToggleShiftLock()
     self.RotateWithCamera = self.IsShiftLockEnabled
     
     if self.IsShiftLockEnabled then
-        -- Lock cursor to center - camera rotates freely without needing RMB
-        -- LockCenter keeps cursor locked while allowing zoom
+        -- Lock cursor to center
         self.Player.CameraMode = Enum.CameraMode.Classic
         UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
         
-        -- Set comfortable zoom distance for locked camera (3rd person, not FPS)
-        self.Player.CameraMinZoomDistance = 20
-        self.Player.CameraMaxZoomDistance = 20
+        -- Lock to comfortable zoom when shift lock on
+        self.TargetZoom = 25
+        self.CurrentZoom = 25
+        self:ApplyZoom(25)
     else
-        -- Release - cursor free, normal camera
+        -- Release cursor
         self.Player.CameraMode = Enum.CameraMode.Classic
         UserInputService.MouseBehavior = Enum.MouseBehavior.Default
         
-        -- Reset zoom range for normal play
-        self.Player.CameraMinZoomDistance = 0.5
-        self.Player.CameraMaxZoomDistance = 128
+        -- Reset zoom limits
+        self.Player.CameraMinZoomDistance = self.MinZoom
+        self.Player.CameraMaxZoomDistance = self.MaxZoom
     end
     
-    print("Shift Lock: " .. (self.IsShiftLockEnabled and "ON (cursor locked)" or "OFF"))
+    print("Shift Lock: " .. (self.IsShiftLockEnabled and "ON" or "OFF"))
 end
 
 function CameraController:HandleZoom(scrollDelta)
-    -- Always allow zoom regardless of shift lock state
-    local currentZoom = self.Camera.CFrame.LookVector.Magnitude
+    -- Smooth zoom - no fixed steps, continuous control
+    -- scrollDelta: positive = scroll up (zoom in), negative = scroll down (zoom out)
     
-    if scrollDelta > 0 then
-        -- Scroll up = zoom in (closer)
-        currentZoom = math.max(self.MinZoom, currentZoom - self.ZoomStep)
-    else
-        -- Scroll down = zoom out (farther)
-        currentZoom = math.min(self.MaxZoom, currentZoom + self.ZoomStep)
+    local zoomChange = scrollDelta * self.ScrollSensitivity * 5 -- Multiply for smoother control
+    self.TargetZoom = self.TargetZoom - zoomChange
+    
+    -- Clamp to limits
+    self.TargetZoom = math.max(self.MinZoom, math.min(self.MaxZoom, self.TargetZoom))
+    
+    -- Reset to FPS if target is very close
+    if self.TargetZoom < 5 then
+        self.Player.CameraMode = Enum.CameraMode.LockFirstPerson
     end
-    
-    -- Apply zoom by setting camera offset
-    -- We do this by modifying the camera's subject offset
-    self:SetCameraZoom(currentZoom)
 end
 
-function CameraController:SetCameraZoom(zoom)
-    -- Set camera distance from character
+function CameraController:Update(dt)
+    -- Smoothly interpolate to target zoom
+    if math.abs(self.CurrentZoom - self.TargetZoom) > 0.1 then
+        self.CurrentZoom = self.CurrentZoom + (self.TargetZoom - self.CurrentZoom) * self.ZoomSpeed * dt
+        self:ApplyZoom(self.CurrentZoom)
+    end
+end
+
+function CameraController:ApplyZoom(zoom)
+    -- Apply zoom by setting camera distance
     self.Player.CameraMinZoomDistance = zoom
     self.Player.CameraMaxZoomDistance = zoom
 end
 
-function CameraController:Update(dt)
-    -- Character rotation is handled by Movement module
-    -- This just tracks the state
-end
-
 function CameraController:GetCameraRelativeDirections()
-    -- Get camera CFrame
     local cameraCFrame = self.Camera.CFrame
-    
-    -- Extract forward and right vectors (flatten to horizontal plane)
     local lookVector = cameraCFrame.LookVector
     local rightVector = cameraCFrame.RightVector
     
-    -- Flatten to horizontal (ignore Y component)
+    -- Flatten to horizontal
     local forward = Vector3.new(lookVector.X, 0, lookVector.Z)
     if forward.Magnitude < 0.01 then
         forward = Vector3.new(0, 0, -1)
@@ -143,18 +143,10 @@ function CameraController:GetCameraRelativeDirections()
 end
 
 function CameraController:ConvertToCameraRelative(inputDir)
-    -- inputDir is a 2D vector: (x, z) from WASD
-    -- Convert to camera-relative 3D direction
-    
     local forward, right = self:GetCameraRelativeDirections()
     
-    -- W = forward, S = back, A = left, D = right
     local moveDir = Vector3.new()
-    
-    -- Forward/back from input.y (W/S)
     moveDir = moveDir + (forward * -inputDir.Y)
-    
-    -- Left/right from input.x (A/D)
     moveDir = moveDir + (right * inputDir.X)
     
     if moveDir.Magnitude > 0.01 then
@@ -165,7 +157,6 @@ function CameraController:ConvertToCameraRelative(inputDir)
 end
 
 function CameraController:GetCameraYaw()
-    -- Get camera's Y rotation (for character facing)
     local lookVector = self.Camera.CFrame.LookVector
     return math.atan2(-lookVector.X, -lookVector.Z)
 end
@@ -175,11 +166,8 @@ function CameraController:Destroy()
         self.Connection:Disconnect()
     end
     
-    -- Reset camera mode
     self.Player.CameraMode = Enum.CameraMode.Classic
     UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-    
-    -- Reset zoom
     self.Player.CameraMinZoomDistance = 0.5
     self.Player.CameraMaxZoomDistance = 400
 end
