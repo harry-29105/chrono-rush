@@ -14,6 +14,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 
 local ChronoRushClient = ReplicatedStorage:WaitForChild("ChronoRush"):WaitForChild("Client")
 
@@ -117,7 +118,7 @@ function GameManager:InitializeModules()
         self.UI:UpdateTokens(tokens)
     end
     
-    -- Movement
+    -- Movement (camera-relative)
     self.Movement = Movement.new(self.Character)
     self.Movement:Start()
     
@@ -143,7 +144,6 @@ function GameManager:InitializeModules()
     end)
     
     -- Add obstacle checking loop
-    local RunService = game:GetService("RunService")
     self.ObstacleCheckConnection = RunService.Heartbeat:Connect(function(dt)
         self:CheckObstacles(dt)
     end)
@@ -153,6 +153,7 @@ function GameManager:StartGame()
     if self.IsGameOver then return end
     
     self.IsPlaying = true
+    self.CheckpointReached = false
     
     -- Reset token manager for new attempt (but keep lifetime tokens)
     self.TokenManager:ResetForNewGame()
@@ -171,7 +172,7 @@ function GameManager:StartGame()
     
     print("=== GAME STARTED ===")
     print("Follow the GREEN platforms!")
-    print("Press P to open shop | WASD=Move | Space=Jump | Q=Dash")
+    print("Press P to open shop | WASD=Move | Space=Jump | Q=Dash | Shift=Camera Lock")
 end
 
 function GameManager:CheckObstacles(dt)
@@ -238,123 +239,6 @@ function GameManager:OnPlayerFell()
     end
     
     self:ShowGameOver("You fell into the lava!")
-end
-
-function GameManager:OnObstacleComplete(obstacleType)
-    -- Award tokens
-    local tokenReward = 10 -- Checkpoint reward
-    self.TokenManager:AddTokens(tokenReward)
-    self.UI:UpdateTokens(self.TokenManager:GetTokens())
-    
-    -- Show reward message
-    self.UI:ShowMessage("Checkpoint! +" .. tokenReward .. " tokens", 3, Color3.fromRGB(255, 215, 0))
-    
-    -- Break combo (survived!)
-    if self.Combo then
-        self.Combo:BreakCombo()
-    end
-    
-    -- Check if level complete (reached finish)
-    self:CheckLevelComplete()
-end
-
-function GameManager:OnObstacleFailed(obstacleType)
-    -- Player died in obstacle
-    self:EndGame("Level 1 Failed")
-end
-
-function GameManager:CheckLevelComplete()
-    local rootPart = self.Character and self.Character:FindFirstChild("HumanoidRootPart")
-    if not rootPart then return end
-    
-    if rootPart.Position.Z >= self.FinishZ then
-        self:CompleteLevel()
-    end
-end
-
-function GameManager:CompleteLevel()
-    self.UI:ShowMessage("Level 1 Complete! +25 tokens", 4, Color3.fromRGB(100, 255, 100))
-    self.TokenManager:AddTokens(25)
-    
-    -- Show victory for now (can expand later)
-    task.delay(4, function()
-        self:ShowVictoryScreen()
-    end)
-end
-    
-    -- Show objective
-    self.UI:ShowMessage("Level 1: LAVA FLOOR\nJump across platforms!\nReach the green checkpoint!", 4, Color3.fromRGB(255, 100, 50))
-    
-    -- Set checkpoints
-    self.CheckpointZ = 90
-    self.FinishZ = 125
-    
-    print("=== GAME STARTED ===")
-    print("Follow the GREEN platforms!")
-    print("Press P to open shop | WASD=Move | Space=Jump | Q=Dash")
-end
-
-function GameManager:StartLevelObstacle()
-    -- Define lava floor obstacle
-    local startZ = self.StartZ
-    local endZ = self.StartZ + 80
-    
-    -- Platform positions (jumping stones)
-    local platforms = {
-        Vector3.new(0, 2, startZ + 15),    -- First jump
-        Vector3.new(5, 3, startZ + 30),    -- Second jump
-        Vector3.new(-5, 4, startZ + 45),    -- Third jump
-        Vector3.new(0, 5, startZ + 60),    -- Fourth jump
-        Vector3.new(3, 5, endZ - 10),      -- Final platform before checkpoint
-    }
-    
-    -- Start lava floor obstacle
-    self.ObstacleManager:StartLavaFloor(startZ, endZ, platforms)
-    
-    -- Set finish position (after checkpoint)
-    self.FinishZ = endZ + 30
-end
-
-function GameManager:OnObstacleComplete(obstacleType)
-    -- Award tokens (reduced for monetization)
-    local tokenReward = 10 -- Checkpoint reward
-    self.TokenManager:AddTokens(tokenReward)
-    self.UI:UpdateTokens(self.TokenManager:GetTokens())
-    
-    -- Show reward message
-    self.UI:ShowMessage("Checkpoint! +" .. tokenReward .. " tokens", 3, Color3.fromRGB(255, 215, 0))
-    
-    -- Break combo (survived!)
-    if self.Combo then
-        self.Combo:BreakCombo()
-    end
-    
-    -- Check if level complete (reached finish)
-    self:CheckLevelComplete()
-end
-
-function GameManager:OnObstacleFailed(obstacleType)
-    -- Player died in obstacle
-    self:EndGame("Level 1 Failed")
-end
-
-function GameManager:CheckLevelComplete()
-    local rootPart = self.Character and self.Character:FindFirstChild("HumanoidRootPart")
-    if not rootPart then return end
-    
-    if rootPart.Position.Z >= self.FinishZ then
-        self:CompleteLevel()
-    end
-end
-
-function GameManager:CompleteLevel()
-    self.UI:ShowMessage("Level 1 Complete! +25 tokens", 4, Color3.fromRGB(100, 255, 100))
-    self.TokenManager:AddTokens(25)
-    
-    -- Show victory for now (can expand later)
-    task.delay(4, function()
-        self:ShowVictoryScreen()
-    end)
 end
 
 function GameManager:EndGame(message)
@@ -491,7 +375,6 @@ function GameManager:ShowVictoryScreen()
 end
 
 function GameManager:ToggleShop()
-    -- Create or show shop UI
     local playerGui = self.Player:WaitForChild("PlayerGui")
     
     local existing = playerGui:FindFirstChild("ShopScreen")
@@ -500,7 +383,6 @@ function GameManager:ToggleShop()
         return
     end
     
-    -- Create shop UI
     self:ShowShopUI(playerGui)
 end
 
@@ -509,7 +391,6 @@ function GameManager:ShowShopUI(playerGui)
     screenGui.Name = "ShopScreen"
     screenGui.Parent = playerGui
     
-    -- Background
     local bg = Instance.new("Frame")
     bg.Size = UDim2.new(0.5, 0, 0.6, 0)
     bg.Position = UDim2.new(0.25, 0, 0.2, 0)
@@ -521,7 +402,6 @@ function GameManager:ShowShopUI(playerGui)
     corner.CornerRadius = UDim.new(0, 15)
     corner.Parent = bg
     
-    -- Title
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, 0, 0.15, 0)
     title.BackgroundTransparency = 1
@@ -531,7 +411,6 @@ function GameManager:ShowShopUI(playerGui)
     title.TextSize = 36
     title.Parent = bg
     
-    -- Token display
     local tokenDisplay = Instance.new("TextLabel")
     tokenDisplay.Size = UDim2.new(1, 0, 0.1, 0)
     tokenDisplay.Position = UDim2.new(0, 0, 0.15, 0)
@@ -542,7 +421,6 @@ function GameManager:ShowShopUI(playerGui)
     tokenDisplay.TextSize = 24
     tokenDisplay.Parent = bg
     
-    -- Equipment list
     local catalog = self.EquipmentShop:GetCatalog()
     local yPos = 0.28
     
@@ -551,7 +429,6 @@ function GameManager:ShowShopUI(playerGui)
         yPos = yPos + 0.14
     end
     
-    -- Close button
     local closeBtn = Instance.new("TextButton")
     closeBtn.Size = UDim2.new(0.2, 0, 0.08, 0)
     closeBtn.Position = UDim2.new(0.4, 0, 0.9, 0)
@@ -582,7 +459,6 @@ function GameManager:CreateShopItem(parent, equipment, yPos)
     itemCorner.CornerRadius = UDim.new(0, 8)
     itemCorner.Parent = itemFrame
     
-    -- Name
     local nameLabel = Instance.new("TextLabel")
     nameLabel.Size = UDim2.new(0.5, 0, 0.5, 0)
     nameLabel.Position = UDim2.new(0, 0, 0, 0)
@@ -594,7 +470,6 @@ function GameManager:CreateShopItem(parent, equipment, yPos)
     nameLabel.TextXAlignment = Enum.TextXAlignment.Left
     nameLabel.Parent = itemFrame
     
-    -- Boost amount
     local boostLabel = Instance.new("TextLabel")
     boostLabel.Size = UDim2.new(0.3, 0, 0.5, 0)
     boostLabel.Position = UDim2.new(0.5, 0, 0, 0)
@@ -606,7 +481,6 @@ function GameManager:CreateShopItem(parent, equipment, yPos)
     boostLabel.TextXAlignment = Enum.TextXAlignment.Left
     boostLabel.Parent = itemFrame
     
-    -- Buy button
     local buyBtn = Instance.new("TextButton")
     buyBtn.Size = UDim2.new(0.2, 0, 0.7, 0)
     buyBtn.Position = UDim2.new(0.75, 0, 0.15, 0)
@@ -620,13 +494,11 @@ function GameManager:CreateShopItem(parent, equipment, yPos)
     btnCorner.CornerRadius = UDim.new(0, 6)
     btnCorner.Parent = buyBtn
     
-    -- Button click
     buyBtn.MouseButton1Click:Connect(function()
         if not self.EquipmentShop:IsOwned(equipment.id) then
             local success = self.EquipmentShop:PurchaseEquipment(equipment.id)
             if success then
                 self.UI:UpdateTokens(self.TokenManager:GetTokens())
-                -- Refresh shop
                 self:ToggleShop()
             else
                 print("Not enough tokens!")
@@ -662,8 +534,11 @@ function GameManager:RestartGame()
 end
 
 function GameManager:Destroy()
-    if self.ObstacleManager then
-        self.ObstacleManager:Destroy()
+    if self.ObstacleCheckConnection then
+        self.ObstacleCheckConnection:Disconnect()
+    end
+    if self.ObstacleCourse then
+        self.ObstacleCourse:Destroy()
     end
     if self.UI then
         self.UI:Destroy()
