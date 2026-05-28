@@ -7,6 +7,11 @@
                 "$path": "src/ReplicatedStorage/ChronoRush"
             }
         },
+        "ServerScriptService": {
+            "LevelBuilder": {
+                "$path": "src/ServerScriptService/LevelBuilder.server.lua"
+            }
+        },
         "StarterPlayer": {
             "StarterPlayerScripts": {
                 "GameStarter": {
