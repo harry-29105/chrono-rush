@@ -42,6 +42,10 @@ function UI:Create()
     self.TimerLabel = self:CreateLabel("30.0s", UDim2.new(0.9, 0, 0.05, 0), 28, Color3.fromRGB(255, 200, 100))
     self.TimerLabel.AnchorPoint = Vector2.new(1, 0)
     
+    -- Token display (below timer)
+    self.TokenLabel = self:CreateLabel("Tokens: 0", UDim2.new(0.9, 0, 0.1, 0), 24, Color3.fromRGB(255, 215, 0))
+    self.TokenLabel.AnchorPoint = Vector2.new(1, 0)
+    
     -- Message display (center)
     self.MessageLabel = self:CreateLabel("", UDim2.new(0.5, 0, 0.35, 0), 48, Color3.fromRGB(255, 255, 255))
     self.MessageLabel.BackgroundTransparency = 0.3
@@ -136,6 +140,10 @@ function UI:UpdateTimer(seconds)
         self.TimerLabel.Text = string.format("%.1fs", math.max(0, seconds))
         self.TimerLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
     end
+end
+
+function UI:UpdateTokens(tokens)
+    self.TokenLabel.Text = "Tokens: " .. tostring(tokens)
 end
 
 function UI:ShowMessage(text, duration, color)

@@ -1,12 +1,14 @@
 --[[
-    ChronoRush - Game Manager (Corridor Runner)
-    Main game loop with original camera-relative movement
+    ChronoRush - Game Manager (Obstacle Course)
+    Main game loop with lava floor obstacle, tokens, and equipment
     
-    Game concept:
-    - Original WASD movement (camera-relative)
-    - Map has walls on sides, straight corridor path
-    - Projectiles fly from ahead, player moves freely
-    - Reach finish line (Z position) to complete level
+    Game Flow:
+    1. Start at beginning of obstacle course
+    2. Complete obstacle to reach checkpoint
+    3. Earn tokens from checkpoint
+    4. Use tokens to buy equipment
+    5. Equipment boosts speed when used
+    6. Reach finish to complete level
 ]]
 
 local Players = game:GetService("Players")
@@ -19,9 +21,11 @@ local Movement = require(ChronoRushClient:WaitForChild("Movement"))
 local Jump = require(ChronoRushClient:WaitForChild("Jump"))
 local Dash = require(ChronoRushClient:WaitForChild("Dash"))
 local Combo = require(ChronoRushClient:WaitForChild("Combo"))
-local ProjectileManager = require(ChronoRushClient:WaitForChild("ProjectileManager"))
 local CameraController = require(ChronoRushClient:WaitForChild("CameraController"))
 local UIManager = require(ChronoRushClient:WaitForChild("UIManager"))
+local TokenManager = require(ChronoRushClient:WaitForChild("TokenManager"))
+local EquipmentShop = require(ChronoRushClient:WaitForChild("EquipmentShop"))
+local ObstacleManager = require(ChronoRushClient:WaitForChild("ObstacleManager"))
 
 local GameManager = {}
 GameManager.__index = GameManager
@@ -35,15 +39,18 @@ function GameManager.new()
     -- Game state
     self.IsPlaying = false
     self.IsGameOver = false
+    self.CurrentLevel = 1
     
     -- Modules
     self.Movement = nil
     self.Jump = nil
     self.Dash = nil
     self.Combo = nil
-    self.ProjectileManager = nil
     self.CameraController = nil
     self.UI = nil
+    self.TokenManager = nil
+    self.EquipmentShop = nil
+    self.ObstacleManager = nil
     
     -- Level state
     self.StartZ = 0
@@ -61,10 +68,12 @@ function GameManager:Start()
         self:OnCharacterAdded(self.Player.Character)
     end
     
+    -- Open shop key
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then return end
-        if input.KeyCode == Enum.KeyCode.Escape then
-            self:TogglePause()
+        
+        if input.KeyCode == Enum.KeyCode.P then
+            self:ToggleShop()
         end
     end)
 end
@@ -72,7 +81,7 @@ end
 function GameManager:OnCharacterAdded(character)
     self.Character = character
     
-    -- Store starting Z position
+    -- Get starting position
     task.wait(0.5)
     local rootPart = character:FindFirstChild("HumanoidRootPart")
     if rootPart then
@@ -85,11 +94,27 @@ end
 function GameManager:InitializeModules()
     if not self.Character then return end
     
-    -- Create UI
+    -- Create UI first
     self.UI = UIManager.new()
     self.UI:Create()
     
-    -- Movement (original camera-relative)
+    -- Token Manager
+    self.TokenManager = TokenManager.new()
+    self.TokenManager:Start()
+    
+    -- Update UI with token display
+    self.UI:UpdateTokens(self.TokenManager:GetTokens())
+    
+    -- Equipment Shop
+    self.EquipmentShop = EquipmentShop.new(self.TokenManager)
+    self.EquipmentShop:Start()
+    
+    -- Equipment callbacks
+    self.EquipmentShop.OnTokensChanged = function(tokens, lifetime)
+        self.UI:UpdateTokens(tokens)
+    end
+    
+    -- Movement
     self.Movement = Movement.new(self.Character)
     self.Movement:Start()
     
@@ -101,82 +126,27 @@ function GameManager:InitializeModules()
     self.Dash = Dash.new(self.Character)
     self.Dash:Start()
     
-    -- Combo
-    self.Combo = Combo.new()
-    self.Combo:Start()
-    
     -- Camera Controller
     self.CameraController = CameraController.new()
     self.CameraController:Start()
     
-    -- Projectile Manager
-    self.ProjectileManager = ProjectileManager.new()
-    self.ProjectileManager:Start()
+    -- Obstacle Manager
+    self.ObstacleManager = ObstacleManager.new()
+    self.ObstacleManager:SetCharacter(self.Character)
+    self.ObstacleManager:Start()
     
-    -- Set up level callbacks
-    self:SetupLevelCallbacks()
+    -- Obstacle callbacks
+    self.ObstacleManager.OnObstacleComplete = function(obstacleType)
+        self:OnObstacleComplete(obstacleType)
+    end
     
-    -- Hit detection
-    self:SetupHitDetection()
+    self.ObstacleManager.OnObstacleFailed = function(obstacleType)
+        self:OnObstacleFailed(obstacleType)
+    end
     
-    -- Start game after delay
+    -- Start game
     task.delay(2, function()
         self:StartGame()
-    end)
-end
-
-function GameManager:SetupLevelCallbacks()
-    if not self.ProjectileManager or not self.ProjectileManager.LevelManager then return end
-    
-    local lm = self.ProjectileManager.LevelManager
-    
-    lm.OnLevelStart = function(level, config)
-        self:OnLevelStart(level, config)
-    end
-    
-    lm.OnLevelComplete = function(level)
-        self:OnLevelComplete(level)
-    end
-    
-    lm.OnLevelFailed = function(level)
-        self:OnLevelFailed(level)
-    end
-    
-    lm.OnGameComplete = function()
-        self:OnGameComplete()
-    end
-    
-    lm.OnProgress = function(playerZ, levelLength)
-        self:OnProgress(playerZ, levelLength)
-    end
-end
-
-function GameManager:SetupHitDetection()
-    if not self.Character then return end
-    
-    local rootPart = self.Character:WaitForChild("HumanoidRootPart")
-    
-    local hitbox = Instance.new("Part")
-    hitbox.Name = "Hitbox"
-    hitbox.Size = Vector3.new(4, 4, 4)
-    hitbox.Shape = Enum.PartType.Ball
-    hitbox.Anchored = false
-    hitbox.CanCollide = false
-    hitbox.Transparency = 1
-    hitbox.Material = Enum.Material.Plastic
-    hitbox.Color = Color3.new(0, 0, 0)
-    hitbox.Parent = rootPart
-    
-    local weld = Instance.new("Weld")
-    weld.Part0 = rootPart
-    weld.Part1 = hitbox
-    weld.Parent = hitbox
-    
-    hitbox.Touched:Connect(function(otherPart)
-        if otherPart.Name == "Projectile" then
-            self:OnPlayerHit()
-            otherPart:Destroy()
-        end
     end)
 end
 
@@ -185,130 +155,97 @@ function GameManager:StartGame()
     
     self.IsPlaying = true
     
-    -- Set finish Z based on start position
+    -- Set level finish position
     local rootPart = self.Character and self.Character:FindFirstChild("HumanoidRootPart")
     if rootPart then
         self.StartZ = rootPart.Position.Z
+        self.FinishZ = self.StartZ + 100 -- Level length
     end
     
-    if self.ProjectileManager then
-        self.ProjectileManager:StartGame()
-    end
+    -- Start lava floor obstacle
+    self:StartLevelObstacle()
+    
+    -- Update UI
+    self.UI:ShowMessage("Level 1\nLava Floor - Jump to survive!", 3, Color3.fromRGB(255, 100, 50))
     
     print("=== GAME STARTED ===")
-    print("Controls: WASD=Move (camera-relative), Space=Jump, Q=Dash")
-    print("Goal: Reach the finish line!")
+    print("Press P to open shop | WASD=Move | Space=Jump | Q=Dash")
 end
 
-function GameManager:OnLevelStart(level, config)
-    local totalLevels = self.ProjectileManager.LevelManager:GetTotalLevels()
-    self.UI:UpdateLevel(level, totalLevels)
-    self.UI:ShowMessage("Level " .. level .. "\nRun to finish!", 2, Color3.fromRGB(100, 255, 200))
-    self.UI:UpdateProgress(0)
+function GameManager:StartLevelObstacle()
+    -- Define lava floor obstacle
+    local startZ = self.StartZ
+    local endZ = self.StartZ + 80
     
-    -- Set finish line Z position
-    local rootPart = self.Character and self.Character:FindFirstChild("HumanoidRootPart")
-    if rootPart then
-        self.StartZ = rootPart.Position.Z
-        self.FinishZ = self.StartZ + config.length
-    end
+    -- Platform positions (jumping stones)
+    local platforms = {
+        Vector3.new(0, 2, startZ + 15),    -- First jump
+        Vector3.new(5, 3, startZ + 30),    -- Second jump
+        Vector3.new(-5, 4, startZ + 45),    -- Third jump
+        Vector3.new(0, 5, startZ + 60),    -- Fourth jump
+        Vector3.new(3, 5, endZ - 10),      -- Final platform before checkpoint
+    }
     
-    -- Update projectile manager with positions
-    if self.ProjectileManager then
-        self.ProjectileManager:SetLevelBounds(self.StartZ, self.FinishZ)
-    end
+    -- Start lava floor obstacle
+    self.ObstacleManager:StartLavaFloor(startZ, endZ, platforms)
     
-    -- Set camera zoom
-    self.Player.CameraMinZoomDistance = 15
-    self.Player.CameraMaxZoomDistance = 50
+    -- Set finish position (after checkpoint)
+    self.FinishZ = endZ + 30
 end
 
-function GameManager:OnProgress(playerZ, levelLength)
-    -- Calculate progress based on Z position
-    local progress = math.clamp((playerZ - self.StartZ) / levelLength, 0, 1)
-    self.UI:UpdateProgress(progress)
+function GameManager:OnObstacleComplete(obstacleType)
+    -- Award tokens
+    local tokenReward = 50
+    self.TokenManager:AddTokens(tokenReward)
+    self.UI:UpdateTokens(self.TokenManager:GetTokens())
     
-    -- Update timer
-    if self.ProjectileManager and self.ProjectileManager.LevelManager then
-        local timeRemaining = self.ProjectileManager.LevelManager:GetTimeRemaining()
-        self.UI:UpdateTimer(timeRemaining)
-    end
+    -- Show reward message
+    self.UI:ShowMessage("Checkpoint! +" .. tokenReward .. " tokens", 3, Color3.fromRGB(255, 215, 0))
     
-    -- Check if reached finish
-    if playerZ >= self.FinishZ and self.IsPlaying then
-        self:OnReachFinish()
-    end
-end
-
-function GameManager:OnReachFinish()
-    if not self.IsPlaying then return end
-    
-    -- Level complete!
-    if self.ProjectileManager and self.ProjectileManager.LevelManager then
-        self.ProjectileManager.LevelManager:LevelComplete()
-    end
-end
-
-function GameManager:OnLevelComplete(level)
-    self.UI:ShowMessage("Level " .. level .. " Complete!", 2, Color3.fromRGB(100, 255, 100))
-    
+    -- Break combo (survived!)
     if self.Combo then
         self.Combo:BreakCombo()
     end
     
-    if self.ProjectileManager then
-        self.ProjectileManager:ClearAllProjectiles()
-    end
+    -- Check if level complete (reached finish)
+    self:CheckLevelComplete()
+end
+
+function GameManager:OnObstacleFailed(obstacleType)
+    -- Player died in obstacle
+    self:EndGame("Level 1 Failed")
+end
+
+function GameManager:CheckLevelComplete()
+    local rootPart = self.Character and self.Character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
     
-    task.delay(3, function()
-        if self.ProjectileManager and self.ProjectileManager.LevelManager then
-            self.ProjectileManager.LevelManager:AdvanceToNextLevel()
-        end
+    if rootPart.Position.Z >= self.FinishZ then
+        self:CompleteLevel()
+    end
+end
+
+function GameManager:CompleteLevel()
+    self.UI:ShowMessage("Level 1 Complete! +100 tokens", 4, Color3.fromRGB(100, 255, 100))
+    self.TokenManager:AddTokens(100)
+    
+    -- Show victory for now (can expand later)
+    task.delay(4, function()
+        self:ShowVictoryScreen()
     end)
 end
 
-function GameManager:OnLevelFailed(level)
-    self.UI:ShowMessage("Hit! Try Again", 2, Color3.fromRGB(255, 100, 100))
-    
-    if self.Combo then
-        self.Combo:BreakCombo()
-    end
-    
-    self:EndGame(level)
-end
-
-function GameManager:OnGameComplete()
-    self.UI:ShowMessage("🎉 VICTORY! 🎉\nAll levels complete!", 4, Color3.fromRGB(255, 215, 0))
-    
-    self:ShowVictoryScreen()
-    
-    self.IsPlaying = false
-    self.IsGameOver = true
-end
-
-function GameManager:OnPlayerHit()
-    if not self.IsPlaying then return end
-    
-    if self.Combo then
-        self.Combo:BreakCombo()
-    end
-    
-    if self.ProjectileManager and self.ProjectileManager.LevelManager then
-        self.ProjectileManager.LevelManager:LevelFailed()
-    end
-end
-
-function GameManager:EndGame(failedLevel)
+function GameManager:EndGame(message)
     self.IsPlaying = false
     
-    if self.ProjectileManager then
-        self.ProjectileManager:StopGame()
+    if self.ObstacleManager then
+        self.ObstacleManager:StopObstacle()
     end
     
-    self:ShowGameOver(failedLevel or 1)
+    self:ShowGameOver(message)
 end
 
-function GameManager:ShowGameOver(level)
+function GameManager:ShowGameOver(message)
     local playerGui = self.Player:WaitForChild("PlayerGui")
     
     local existing = playerGui:FindFirstChild("GameOverScreen")
@@ -319,8 +256,8 @@ function GameManager:ShowGameOver(level)
     screenGui.Parent = playerGui
     
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(0.4, 0, 0.35, 0)
-    frame.Position = UDim2.new(0.3, 0, 0.32, 0)
+    frame.Size = UDim2.new(0.4, 0, 0.4, 0)
+    frame.Position = UDim2.new(0.3, 0, 0.3, 0)
     frame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
     frame.BorderSizePixel = 0
     frame.Parent = screenGui
@@ -330,41 +267,41 @@ function GameManager:ShowGameOver(level)
     corner.Parent = frame
     
     local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, 0, 0.35, 0)
+    title.Size = UDim2.new(1, 0, 0.3, 0)
     title.Position = UDim2.new(0, 0, 0.1, 0)
     title.BackgroundTransparency = 1
     title.Font = Enum.Font.GothamBold
-    title.Text = "💀 HIT! 💀"
+    title.Text = "💀 " .. (message or "GAME OVER") .. " 💀"
     title.TextColor3 = Color3.fromRGB(255, 80, 80)
-    title.TextSize = 48
+    title.TextSize = 42
     title.Parent = frame
     
-    local subTitle = Instance.new("TextLabel")
-    subTitle.Size = UDim2.new(1, 0, 0.25, 0)
-    subTitle.Position = UDim2.new(0, 0, 0.4, 0)
-    subTitle.BackgroundTransparency = 1
-    subTitle.Font = Enum.Font.GothamMedium
-    subTitle.Text = "Failed at Level " .. tostring(level)
-    subTitle.TextColor3 = Color3.fromRGB(200, 200, 200)
-    subTitle.TextSize = 28
-    subTitle.Parent = frame
+    local tokenInfo = Instance.new("TextLabel")
+    tokenInfo.Size = UDim2.new(1, 0, 0.2, 0)
+    tokenInfo.Position = UDim2.new(0, 0, 0.4, 0)
+    tokenInfo.BackgroundTransparency = 1
+    tokenInfo.Font = Enum.Font.GothamMedium
+    tokenInfo.Text = "Tokens saved: " .. self.TokenManager:GetLifetimeTokens()
+    tokenInfo.TextColor3 = Color3.fromRGB(255, 215, 0)
+    tokenInfo.TextSize = 28
+    tokenInfo.Parent = frame
     
-    local restartBtn = Instance.new("TextButton")
-    restartBtn.Size = UDim2.new(0.5, 0, 0.15, 0)
-    restartBtn.Position = UDim2.new(0.25, 0, 0.7, 0)
-    restartBtn.BackgroundColor3 = Color3.fromRGB(80, 200, 150)
-    restartBtn.BorderSizePixel = 0
-    restartBtn.Font = Enum.Font.GothamBold
-    restartBtn.Text = "RETRY"
-    restartBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    restartBtn.TextSize = 32
-    restartBtn.Parent = frame
+    local retryBtn = Instance.new("TextButton")
+    retryBtn.Size = UDim2.new(0.5, 0, 0.15, 0)
+    retryBtn.Position = UDim2.new(0.25, 0, 0.7, 0)
+    retryBtn.BackgroundColor3 = Color3.fromRGB(80, 200, 150)
+    retryBtn.BorderSizePixel = 0
+    retryBtn.Font = Enum.Font.GothamBold
+    retryBtn.Text = "RETRY"
+    retryBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    retryBtn.TextSize = 32
+    retryBtn.Parent = frame
     
     local btnCorner = Instance.new("UICorner")
     btnCorner.CornerRadius = UDim.new(0, 10)
-    btnCorner.Parent = restartBtn
+    btnCorner.Parent = retryBtn
     
-    restartBtn.MouseButton1Click:Connect(function()
+    retryBtn.MouseButton1Click:Connect(function()
         screenGui:Destroy()
         self:RestartGame()
     end)
@@ -373,13 +310,16 @@ end
 function GameManager:ShowVictoryScreen()
     local playerGui = self.Player:WaitForChild("PlayerGui")
     
+    local existing = playerGui:FindFirstChild("VictoryScreen")
+    if existing then existing:Destroy() end
+    
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "VictoryScreen"
     screenGui.Parent = playerGui
     
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(0.5, 0, 0.4, 0)
-    frame.Position = UDim2.new(0.25, 0, 0.3, 0)
+    frame.Size = UDim2.new(0.5, 0, 0.45, 0)
+    frame.Position = UDim2.new(0.25, 0, 0.28, 0)
     frame.BackgroundColor3 = Color3.fromRGB(30, 30, 20)
     frame.BorderSizePixel = 0
     frame.Parent = screenGui
@@ -389,44 +329,190 @@ function GameManager:ShowVictoryScreen()
     corner.Parent = frame
     
     local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, 0, 0.4, 0)
+    title.Size = UDim2.new(1, 0, 0.35, 0)
     title.Position = UDim2.new(0, 0, 0.05, 0)
     title.BackgroundTransparency = 1
     title.Font = Enum.Font.GothamBold
-    title.Text = "🎉 VICTORY! 🎉"
+    title.Text = "🎉 LEVEL 1 COMPLETE! 🎉"
     title.TextColor3 = Color3.fromRGB(255, 215, 0)
-    title.TextSize = 56
+    title.TextSize = 48
     title.Parent = frame
     
-    local subTitle = Instance.new("TextLabel")
-    subTitle.Size = UDim2.new(1, 0, 0.3, 0)
-    subTitle.Position = UDim2.new(0, 0, 0.4, 0)
-    subTitle.BackgroundTransparency = 1
-    subTitle.Font = Enum.Font.GothamMedium
-    subTitle.Text = "You completed all 10 levels!"
-    subTitle.TextColor3 = Color3.fromRGB(200, 255, 200)
-    subTitle.TextSize = 32
-    subTitle.Parent = frame
+    local tokenInfo = Instance.new("TextLabel")
+    tokenInfo.Size = UDim2.new(1, 0, 0.25, 0)
+    tokenInfo.Position = UDim2.new(0, 0, 0.35, 0)
+    tokenInfo.BackgroundTransparency = 1
+    tokenInfo.Font = Enum.Font.GothamMedium
+    tokenInfo.Text = "Total Tokens: " .. self.TokenManager:GetLifetimeTokens()
+    tokenInfo.TextColor3 = Color3.fromRGB(200, 255, 200)
+    tokenInfo.TextSize = 32
+    tokenInfo.Parent = frame
     
-    local restartBtn = Instance.new("TextButton")
-    restartBtn.Size = UDim2.new(0.6, 0, 0.18, 0)
-    restartBtn.Position = UDim2.new(0.2, 0, 0.7, 0)
-    restartBtn.BackgroundColor3 = Color3.fromRGB(100, 200, 255)
-    restartBtn.BorderSizePixel = 0
-    restartBtn.Font = Enum.Font.GothamBold
-    restartBtn.Text = "PLAY AGAIN"
-    restartBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    restartBtn.TextSize = 32
-    restartBtn.Parent = frame
+    local shopBtn = Instance.new("TextButton")
+    shopBtn.Size = UDim2.new(0.6, 0, 0.15, 0)
+    shopBtn.Position = UDim2.new(0.2, 0, 0.65, 0)
+    shopBtn.BackgroundColor3 = Color3.fromRGB(255, 200, 100)
+    shopBtn.BorderSizePixel = 0
+    shopBtn.Font = Enum.Font.GothamBold
+    shopBtn.Text = "OPEN SHOP (P)"
+    shopBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
+    shopBtn.TextSize = 28
+    shopBtn.Parent = frame
+    
+    local shopCorner = Instance.new("UICorner")
+    shopCorner.CornerRadius = UDim.new(0, 10)
+    shopCorner.Parent = shopBtn
+    
+    shopBtn.MouseButton1Click:Connect(function()
+        self:ToggleShop()
+    end)
+end
+
+function GameManager:ToggleShop()
+    -- Create or show shop UI
+    local playerGui = self.Player:WaitForChild("PlayerGui")
+    
+    local existing = playerGui:FindFirstChild("ShopScreen")
+    if existing then
+        existing:Destroy()
+        return
+    end
+    
+    -- Create shop UI
+    self:ShowShopUI(playerGui)
+end
+
+function GameManager:ShowShopUI(playerGui)
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "ShopScreen"
+    screenGui.Parent = playerGui
+    
+    -- Background
+    local bg = Instance.new("Frame")
+    bg.Size = UDim2.new(0.5, 0, 0.6, 0)
+    bg.Position = UDim2.new(0.25, 0, 0.2, 0)
+    bg.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+    bg.BorderSizePixel = 0
+    bg.Parent = screenGui
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 15)
+    corner.Parent = bg
+    
+    -- Title
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, 0, 0.15, 0)
+    title.BackgroundTransparency = 1
+    title.Font = Enum.Font.GothamBold
+    title.Text = "EQUIPMENT SHOP"
+    title.TextColor3 = Color3.fromRGB(255, 215, 0)
+    title.TextSize = 36
+    title.Parent = bg
+    
+    -- Token display
+    local tokenDisplay = Instance.new("TextLabel")
+    tokenDisplay.Size = UDim2.new(1, 0, 0.1, 0)
+    tokenDisplay.Position = UDim2.new(0, 0, 0.15, 0)
+    tokenDisplay.BackgroundTransparency = 1
+    tokenDisplay.Font = Enum.Font.GothamMedium
+    tokenDisplay.Text = "Your Tokens: " .. self.TokenManager:GetTokens()
+    tokenDisplay.TextColor3 = Color3.fromRGB(255, 255, 255)
+    tokenDisplay.TextSize = 24
+    tokenDisplay.Parent = bg
+    
+    -- Equipment list
+    local catalog = self.EquipmentShop:GetCatalog()
+    local yPos = 0.28
+    
+    for i, equipment in ipairs(catalog) do
+        local itemFrame = self:CreateShopItem(bg, equipment, yPos)
+        yPos = yPos + 0.14
+    end
+    
+    -- Close button
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Size = UDim2.new(0.2, 0, 0.08, 0)
+    closeBtn.Position = UDim2.new(0.4, 0, 0.9, 0)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
+    closeBtn.Text = "CLOSE (P)"
+    closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeBtn.TextSize = 20
+    closeBtn.Parent = bg
+    
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.CornerRadius = UDim.new(0, 8)
+    closeCorner.Parent = closeBtn
+    
+    closeBtn.MouseButton1Click:Connect(function()
+        screenGui:Destroy()
+    end)
+end
+
+function GameManager:CreateShopItem(parent, equipment, yPos)
+    local itemFrame = Instance.new("Frame")
+    itemFrame.Size = UDim2.new(0.9, 0, 0.12, 0)
+    itemFrame.Position = UDim2.new(0.05, 0, yPos, 0)
+    itemFrame.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+    itemFrame.BorderSizePixel = 0
+    itemFrame.Parent = parent
+    
+    local itemCorner = Instance.new("UICorner")
+    itemCorner.CornerRadius = UDim.new(0, 8)
+    itemCorner.Parent = itemFrame
+    
+    -- Name
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.new(0.5, 0, 0.5, 0)
+    nameLabel.Position = UDim2.new(0, 0, 0, 0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Font = Enum.Font.GothamBold
+    nameLabel.Text = equipment.name
+    nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    nameLabel.TextSize = 20
+    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    nameLabel.Parent = itemFrame
+    
+    -- Boost amount
+    local boostLabel = Instance.new("TextLabel")
+    boostLabel.Size = UDim2.new(0.3, 0, 0.5, 0)
+    boostLabel.Position = UDim2.new(0.5, 0, 0, 0)
+    boostLabel.BackgroundTransparency = 1
+    boostLabel.Font = Enum.Font.GothamMedium
+    boostLabel.Text = "+" .. (equipment.speedBoost * 100) .. "% speed"
+    boostLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+    boostLabel.TextSize = 18
+    boostLabel.TextXAlignment = Enum.TextXAlignment.Left
+    boostLabel.Parent = itemFrame
+    
+    -- Buy button
+    local buyBtn = Instance.new("TextButton")
+    buyBtn.Size = UDim2.new(0.2, 0, 0.7, 0)
+    buyBtn.Position = UDim2.new(0.75, 0, 0.15, 0)
+    buyBtn.BackgroundColor3 = self.EquipmentShop:IsOwned(equipment.id) and Color3.fromRGB(100, 100, 100) or Color3.fromRGB(255, 200, 50)
+    buyBtn.Text = self.EquipmentShop:IsOwned(equipment.id) and "OWNED" or (equipment.tokenCost .. " tokens")
+    buyBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
+    buyBtn.TextSize = 16
+    buyBtn.Parent = itemFrame
     
     local btnCorner = Instance.new("UICorner")
-    btnCorner.CornerRadius = UDim.new(0, 10)
-    btnCorner.Parent = restartBtn
+    btnCorner.CornerRadius = UDim.new(0, 6)
+    btnCorner.Parent = buyBtn
     
-    restartBtn.MouseButton1Click:Connect(function()
-        screenGui:Destroy()
-        self:RestartGame()
+    -- Button click
+    buyBtn.MouseButton1Click:Connect(function()
+        if not self.EquipmentShop:IsOwned(equipment.id) then
+            local success = self.EquipmentShop:PurchaseEquipment(equipment.id)
+            if success then
+                self.UI:UpdateTokens(self.TokenManager:GetTokens())
+                -- Refresh shop
+                self:ToggleShop()
+            else
+                print("Not enough tokens!")
+            end
+        end
     end)
+    
+    return itemFrame
 end
 
 function GameManager:RestartGame()
@@ -439,18 +525,21 @@ function GameManager:RestartGame()
     self.UI = UIManager.new()
     self.UI:Create()
     
+    self.UI:UpdateTokens(self.TokenManager:GetTokens())
+    
+    -- Reinitialize character modules
+    if self.ObstacleManager then
+        self.ObstacleManager:SetCharacter(self.Character)
+    end
+    
     task.delay(1, function()
         self:StartGame()
     end)
 end
 
-function GameManager:TogglePause()
-    -- TODO
-end
-
 function GameManager:Destroy()
-    if self.ProjectileManager then
-        self.ProjectileManager:Destroy()
+    if self.ObstacleManager then
+        self.ObstacleManager:Destroy()
     end
     if self.UI then
         self.UI:Destroy()
