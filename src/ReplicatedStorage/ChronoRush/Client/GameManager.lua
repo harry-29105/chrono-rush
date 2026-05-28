@@ -98,6 +98,12 @@ function GameManager:InitializeModules()
     self.ProjectileManager = ProjectileManager.new()
     self.ProjectileManager:Start()
     
+    -- Auto-start game for immediate testing (remove for production)
+    task.delay(1, function()
+        self:StartGame()
+        print("Game auto-started - have fun dodging!")
+    end)
+    
     -- Set up hit detection
     self:SetupHitDetection()
 end

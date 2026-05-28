@@ -1,7 +1,7 @@
 --[[
     ChronoRush - Dash Module
     Handles dash ability with cooldown and charges
-    Blox Fruits-style: purely horizontal dash, direction based on where you're facing
+    Blox Fruits-style: dash in WASD input direction, NOT facing direction
 ]]
 
 local Players = game:GetService("Players")
@@ -14,6 +14,14 @@ local Constants = require(ReplicatedStorage:WaitForChild("ChronoRush"):WaitForCh
 
 local Dash = {}
 Dash.__index = Dash
+
+-- Key code mappings for WASD
+local KEY_TO_DIRECTION = {
+    [Enum.KeyCode.W] = Vector3.new(0, 0, -1),
+    [Enum.KeyCode.S] = Vector3.new(0, 0, 1),
+    [Enum.KeyCode.A] = Vector3.new(-1, 0, 0),
+    [Enum.KeyCode.D] = Vector3.new(1, 0, 0),
+}
 
 function Dash.new(character)
     local self = setmetatable({}, Dash)
@@ -68,9 +76,9 @@ function Dash:ExecuteDash()
     self.IsDashing = true
     self.Charges = self.Charges - 1
     
-    -- BLOX FRUITS STYLE: Dash in the direction you're FACING (LookVector)
-    -- Not in the direction you're moving
-    local dashDir = rootPart.CFrame.LookVector
+    -- BLOX FRUITS STYLE: Dash in WASD INPUT direction, NOT facing direction
+    -- Use last known movement input, or default forward if no input
+    local dashDir = self:GetCurrentInputDirection()
     
     -- Normalize to purely horizontal (ignore Y)
     dashDir = Vector3.new(dashDir.X, 0, dashDir.Z)
@@ -106,6 +114,47 @@ function Dash:ExecuteDash()
             end
         end)
     end)
+end
+
+function Dash:GetCurrentInputDirection()
+    -- Check which WASD keys are currently held
+    local direction = Vector3.new()
+    
+    if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+        direction = direction + Vector3.new(0, 0, -1)
+    end
+    if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+        direction = direction + Vector3.new(0, 0, 1)
+    end
+    if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+        direction = direction + Vector3.new(-1, 0, 0)
+    end
+    if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+        direction = direction + Vector3.new(1, 0, 0)
+    end
+    
+    if direction.Magnitude > 0 then
+        return direction.Unit
+    end
+    
+    -- Fallback to last movement direction from character
+    if self.Character then
+        local humanoid = self.Character:FindFirstChild("Humanoid")
+        if humanoid then
+            local moveDir = humanoid.MoveDirection
+            if moveDir.Magnitude > 0 then
+                return moveDir.Unit
+            end
+        end
+    end
+    
+    -- Final fallback: use facing direction
+    if self.RootPart then
+        local lookDir = self.RootPart.CFrame.LookVector
+        return Vector3.new(lookDir.X, 0, lookDir.Z).Unit
+    end
+    
+    return Vector3.new(1, 0, 0) -- Absolute fallback
 end
 
 function Dash:SpawnDashEffect(rootPart)
