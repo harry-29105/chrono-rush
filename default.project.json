@@ -8,8 +8,8 @@
             }
         },
         "ServerScriptService": {
-            "LevelBuilder": {
-                "$path": "src/ServerScriptService/LevelBuilder.server.lua"
+            "MapBuilder": {
+                "$path": "src/ServerScriptService/MapBuilder.server.lua"
             }
         },
         "StarterPlayer": {
