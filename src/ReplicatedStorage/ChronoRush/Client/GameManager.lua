@@ -25,7 +25,7 @@ local CameraController = require(ChronoRushClient:WaitForChild("CameraController
 local UIManager = require(ChronoRushClient:WaitForChild("UIManager"))
 local TokenManager = require(ChronoRushClient:WaitForChild("TokenManager"))
 local EquipmentShop = require(ChronoRushClient:WaitForChild("EquipmentShop"))
-local ObstacleManager = require(ChronoRushClient:WaitForChild("ObstacleManager"))
+local ObstacleCourse = require(ChronoRushClient:WaitForChild("ObstacleCourse"))
 
 local GameManager = {}
 GameManager.__index = GameManager
@@ -50,11 +50,14 @@ function GameManager.new()
     self.UI = nil
     self.TokenManager = nil
     self.EquipmentShop = nil
-    self.ObstacleManager = nil
+    self.ObstacleCourse = nil
     
     -- Level state
     self.StartZ = 0
     self.FinishZ = 100
+    self.CheckpointZ = 90
+    self.CheckpointReached = false
+    self.ObstacleCheckConnection = nil
     
     return self
 end
@@ -130,23 +133,19 @@ function GameManager:InitializeModules()
     self.CameraController = CameraController.new()
     self.CameraController:Start()
     
-    -- Obstacle Manager
-    self.ObstacleManager = ObstacleManager.new()
-    self.ObstacleManager:SetCharacter(self.Character)
-    self.ObstacleManager:Start()
-    
-    -- Obstacle callbacks
-    self.ObstacleManager.OnObstacleComplete = function(obstacleType)
-        self:OnObstacleComplete(obstacleType)
-    end
-    
-    self.ObstacleManager.OnObstacleFailed = function(obstacleType)
-        self:OnObstacleFailed(obstacleType)
-    end
+    -- Obstacle Course
+    self.ObstacleCourse = ObstacleCourse.new()
+    self.ObstacleCourse:CreateLevel1()
     
     -- Start game
     task.delay(2, function()
         self:StartGame()
+    end)
+    
+    -- Add obstacle checking loop
+    local RunService = game:GetService("RunService")
+    self.ObstacleCheckConnection = RunService.Heartbeat:Connect(function(dt)
+        self:CheckObstacles(dt)
     end)
 end
 
@@ -155,20 +154,143 @@ function GameManager:StartGame()
     
     self.IsPlaying = true
     
-    -- Set level finish position
-    local rootPart = self.Character and self.Character:FindFirstChild("HumanoidRootPart")
-    if rootPart then
-        self.StartZ = rootPart.Position.Z
-        self.FinishZ = self.StartZ + 100 -- Level length
+    -- Reset token manager for new attempt (but keep lifetime tokens)
+    self.TokenManager:ResetForNewGame()
+    
+    -- Teleport to start if exists
+    if self.ObstacleCourse then
+        self.ObstacleCourse:TeleportToStart()
     end
     
-    -- Start lava floor obstacle
-    self:StartLevelObstacle()
+    -- Show objective
+    self.UI:ShowMessage("Level 1: LAVA FLOOR\nJump across platforms!\nReach the green checkpoint!", 4, Color3.fromRGB(255, 100, 50))
     
-    -- Update UI
-    self.UI:ShowMessage("Level 1\nLava Floor - Jump to survive!", 3, Color3.fromRGB(255, 100, 50))
+    -- Set checkpoints
+    self.CheckpointZ = 90
+    self.FinishZ = 125
     
     print("=== GAME STARTED ===")
+    print("Follow the GREEN platforms!")
+    print("Press P to open shop | WASD=Move | Space=Jump | Q=Dash")
+end
+
+function GameManager:CheckObstacles(dt)
+    if not self.IsPlaying then return end
+    if not self.Character then return end
+    
+    local rootPart = self.Character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+    
+    local playerZ = rootPart.Position.Z
+    local playerY = rootPart.Position.Y
+    
+    -- Check if fell into lava (below floor level)
+    if playerY < -2 then
+        self:OnPlayerFell()
+        return
+    end
+    
+    -- Check if reached checkpoint
+    if playerZ >= self.CheckpointZ and not self.CheckpointReached then
+        self.CheckpointReached = true
+        self:OnCheckpointReached()
+        return
+    end
+    
+    -- Check if reached finish
+    if playerZ >= self.FinishZ then
+        self:OnFinishReached()
+        return
+    end
+end
+
+function GameManager:OnCheckpointReached()
+    -- Award tokens
+    local tokenReward = 10
+    self.TokenManager:AddTokens(tokenReward)
+    self.UI:UpdateTokens(self.TokenManager:GetTokens())
+    
+    -- Show reward message
+    self.UI:ShowMessage("Checkpoint! +" .. tokenReward .. " tokens", 3, Color3.fromRGB(0, 255, 200))
+    print("Checkpoint reached!")
+end
+
+function GameManager:OnFinishReached()
+    self.IsPlaying = false
+    
+    -- Award level complete tokens
+    self.TokenManager:AddTokens(25)
+    
+    -- Show victory
+    self.UI:ShowMessage("Level 1 Complete! +25 tokens", 4, Color3.fromRGB(100, 255, 100))
+    
+    task.delay(4, function()
+        self:ShowVictoryScreen()
+    end)
+end
+
+function GameManager:OnPlayerFell()
+    self.IsPlaying = false
+    
+    -- Break combo
+    if self.Combo then
+        self.Combo:BreakCombo()
+    end
+    
+    self:ShowGameOver("You fell into the lava!")
+end
+
+function GameManager:OnObstacleComplete(obstacleType)
+    -- Award tokens
+    local tokenReward = 10 -- Checkpoint reward
+    self.TokenManager:AddTokens(tokenReward)
+    self.UI:UpdateTokens(self.TokenManager:GetTokens())
+    
+    -- Show reward message
+    self.UI:ShowMessage("Checkpoint! +" .. tokenReward .. " tokens", 3, Color3.fromRGB(255, 215, 0))
+    
+    -- Break combo (survived!)
+    if self.Combo then
+        self.Combo:BreakCombo()
+    end
+    
+    -- Check if level complete (reached finish)
+    self:CheckLevelComplete()
+end
+
+function GameManager:OnObstacleFailed(obstacleType)
+    -- Player died in obstacle
+    self:EndGame("Level 1 Failed")
+end
+
+function GameManager:CheckLevelComplete()
+    local rootPart = self.Character and self.Character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+    
+    if rootPart.Position.Z >= self.FinishZ then
+        self:CompleteLevel()
+    end
+end
+
+function GameManager:CompleteLevel()
+    self.UI:ShowMessage("Level 1 Complete! +25 tokens", 4, Color3.fromRGB(100, 255, 100))
+    self.TokenManager:AddTokens(25)
+    
+    -- Show victory for now (can expand later)
+    task.delay(4, function()
+        self:ShowVictoryScreen()
+    end)
+end
+    
+    -- Show objective
+    self.UI:ShowMessage("Level 1: LAVA FLOOR\nJump across platforms!\nReach the green checkpoint!", 4, Color3.fromRGB(255, 100, 50))
+    
+    -- Set checkpoints
+    self.CheckpointZ = 90
+    self.FinishZ = 125
+    
+    print("=== GAME STARTED ===")
+    print("Follow the GREEN platforms!")
     print("Press P to open shop | WASD=Move | Space=Jump | Q=Dash")
 end
 
@@ -238,8 +360,8 @@ end
 function GameManager:EndGame(message)
     self.IsPlaying = false
     
-    if self.ObstacleManager then
-        self.ObstacleManager:StopObstacle()
+    if self.ObstacleCourse then
+        self.ObstacleCourse:ClearCourse()
     end
     
     self:ShowGameOver(message)
@@ -518,6 +640,7 @@ end
 function GameManager:RestartGame()
     self.IsGameOver = false
     self.IsPlaying = false
+    self.CheckpointReached = false
     
     if self.UI then
         self.UI:Destroy()
@@ -527,9 +650,10 @@ function GameManager:RestartGame()
     
     self.UI:UpdateTokens(self.TokenManager:GetTokens())
     
-    -- Reinitialize character modules
-    if self.ObstacleManager then
-        self.ObstacleManager:SetCharacter(self.Character)
+    -- Rebuild obstacle course
+    if self.ObstacleCourse then
+        self.ObstacleCourse:CreateLevel1()
+        self.ObstacleCourse:TeleportToStart()
     end
     
     task.delay(1, function()
