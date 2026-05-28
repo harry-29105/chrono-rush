@@ -3,13 +3,18 @@
     "tree": {
         "$className": "DataModel",
         "ReplicatedStorage": {
-            "$className": "ReplicatedStorage",
             "ChronoRush": {
                 "$path": "src/ReplicatedStorage/ChronoRush"
             }
         },
+        "StarterPlayer": {
+            "StarterPlayerScripts": {
+                "GameStarter": {
+                    "$path": "src/StarterPlayer/StarterPlayerScripts/GameStarter.client.lua"
+                }
+            }
+        },
         "Workspace": {
-            "$className": "Workspace",
             "ChronoRush": {
                 "$path": "src/Workspace/ChronoRush"
             }

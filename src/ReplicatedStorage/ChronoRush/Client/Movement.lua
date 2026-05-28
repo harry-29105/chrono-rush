@@ -2,13 +2,15 @@
     ChronoRush - Movement Module
     Handles player movement with smooth acceleration/deceleration
     Blox Fruits-inspired floaty but responsive feel
+    Cooperates with Dash module via character attributes
 ]]
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 
-local Constants = require(script.Parent.Parent.Shared.Constants)
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Constants = require(ReplicatedStorage:WaitForChild("ChronoRush"):WaitForChild("Shared"):WaitForChild("Constants"))
 
 local Movement = {}
 Movement.__index = Movement
@@ -26,7 +28,7 @@ function Movement.new(character)
     self.LastMoveInput = Vector3.new()
     
     -- Physics
-    self.GroundDetector = nil
+    self.BodyVelocity = nil
     
     return self
 end
@@ -40,6 +42,11 @@ function Movement:Start()
     -- Set initial physics
     self.Humanoid.WalkSpeed = Constants.MOVE_SPEED
     self.Humanoid.JumpPower = Constants.JUMP_FORCE
+    
+    -- Create BodyVelocity for custom movement
+    self.BodyVelocity = Instance.new("BodyVelocity")
+    self.BodyVelocity.MaxForce = Vector3.new(math.huge, 0, math.huge)
+    self.BodyVelocity.Parent = self.RootPart
     
     -- Track movement input
     self.Humanoid:GetPropertyChangedSignal("MoveDirection"):Connect(function()
@@ -63,20 +70,44 @@ function Movement:Update(dt)
     local humanoid = self.Humanoid
     local rootPart = self.RootPart
     
-    if not humanoid or not rootPart then return end
+    if not humanoid or not rootPart or not self.BodyVelocity then return end
+    
+    -- CHECK IF DASHING - override velocity if so (Blox Fruits style)
+    if self.Character and self.Character:GetAttribute("Dashing") then
+        local dashEndTime = self.Character:GetAttribute("DashEndTime") or 0
+        local dashDir = self.Character:GetAttribute("DashDirection")
+        
+        if dashDir and tick() < dashEndTime then
+            -- DASH MODE - apply full velocity control to fight gravity
+            self.BodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+            local currentY = rootPart.Velocity.Y
+            self.BodyVelocity.Velocity = Vector3.new(
+                dashDir.X * Constants.DASH_SPEED, 
+                currentY,
+                dashDir.Z * Constants.DASH_SPEED
+            )
+            return -- Skip normal movement
+        else
+            -- Dash ended
+            if self.Character then
+                self.Character:SetAttribute("Dashing", false)
+            end
+        end
+    end
+    
+    -- NORMAL MOVEMENT - restore X/Z control only
+    self.BodyVelocity.MaxForce = Vector3.new(math.huge, 0, math.huge)
     
     -- Get movement input
     local moveDir = humanoid.MoveDirection
     
     -- Apply acceleration/deceleration for smooth feel
     if moveDir.Magnitude > 0 then
-        -- Accelerate towards input direction
         self.CurrentVelocity = self.CurrentVelocity:Lerp(
             moveDir * Constants.MOVE_SPEED,
             Constants.ACCELERATION * dt
         )
     else
-        -- Decelerate when no input
         self.CurrentVelocity = self.CurrentVelocity:Lerp(
             Vector3.new(),
             Constants.DECELERATION * dt
@@ -89,14 +120,7 @@ function Movement:Update(dt)
         self.CurrentVelocity = self.CurrentVelocity * Constants.AIR_CONTROL
     end
     
-    -- Apply velocity via BodyVelocity
-    if not self.BodyVelocity then
-        self.BodyVelocity = Instance.new("BodyVelocity")
-        self.BodyVelocity.MaxForce = Vector3.new(math.huge, 0, math.huge)
-        self.BodyVelocity.Parent = rootPart
-    end
-    
-    -- Only move horizontally (preserve jump/dash vertical)
+    -- Only move horizontally (preserve jump/fall via physics)
     local horizontalVel = Vector3.new(self.CurrentVelocity.X, 0, self.CurrentVelocity.Z)
     self.BodyVelocity.Velocity = horizontalVel
 end

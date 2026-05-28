@@ -7,11 +7,13 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
-local Movement = require(script.Movement)
-local Jump = require(script.Jump)
-local Dash = require(script.Dash)
-local Combo = require(script.Combo)
-local ProjectileManager = require(script.ProjectileManager)
+local ChronoRushClient = ReplicatedStorage:WaitForChild("ChronoRush"):WaitForChild("Client")
+
+local Movement = require(ChronoRushClient:WaitForChild("Movement"))
+local Jump = require(ChronoRushClient:WaitForChild("Jump"))
+local Dash = require(ChronoRushClient:WaitForChild("Dash"))
+local Combo = require(ChronoRushClient:WaitForChild("Combo"))
+local ProjectileManager = require(ChronoRushClient:WaitForChild("ProjectileManager"))
 
 local GameManager = {}
 GameManager.__index = GameManager
@@ -113,15 +115,25 @@ function GameManager:SetupHitDetection()
         end
     end)
     
-    -- Projectile collision detection
+    -- Projectile collision detection - make it invisible and properly sized
     local hitbox = Instance.new("Part")
     hitbox.Name = "Hitbox"
-    hitbox.Size = Vector3.new(5, 5, 5)
+    hitbox.Size = Vector3.new(4, 4, 4) -- Smaller hitbox
+    hitbox.Shape = Enum.PartType.Ball
     hitbox.Anchored = false
     hitbox.CanCollide = false
-    hitbox.Transparency = 0.5
+    hitbox.Transparency = 1 -- Fully invisible
+    hitbox.Material = Enum.Material.Plastic
+    hitbox.Color = Color3.new(0, 0, 0)
     hitbox.Parent = rootPart
     
+    -- Weld to character
+    local weld = Instance.new("Weld")
+    weld.Part0 = rootPart
+    weld.Part1 = hitbox
+    weld.Parent = hitbox
+    
+    -- Touch detection
     local connection
     connection = hitbox.Touched:Connect(function(otherPart)
         if otherPart.Name == "Projectile" then
@@ -129,14 +141,6 @@ function GameManager:SetupHitDetection()
             otherPart:Destroy()
         end
     end)
-    
-    hitbox.Anchored = false
-    -- Weld to character
-    local weld = Instance.new("Weld")
-    weld.Part0 = rootPart
-    weld.Part1 = hitbox
-    weld.C0 = CFrame.new(0, 0, 0)
-    weld.Parent = hitbox
 end
 
 function GameManager:StartGame()

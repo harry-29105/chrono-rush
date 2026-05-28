@@ -1,12 +1,14 @@
 --[[
     ChronoRush - Jump Module
     Handles double jump with air control
+    Blox Fruits-inspired - smooth, higher second jump
 ]]
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
-local Constants = require(script.Parent.Parent.Shared.Constants)
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Constants = require(ReplicatedStorage:WaitForChild("ChronoRush"):WaitForChild("Shared"):WaitForChild("Constants"))
 
 local Jump = {}
 Jump.__index = Jump
@@ -22,9 +24,7 @@ function Jump.new(character)
     self.JumpsRemaining = Constants.MAX_JUMPS
     self.IsGrounded = true
     self.JumpBufferTimer = 0
-    
-    -- Tracks if we've used ground jump
-    self.HasUsedGroundJump = false
+    self.LastJumpTime = 0
     
     return self
 end
@@ -40,8 +40,14 @@ function Jump:Start()
     -- Initial ground check
     self:CheckGrounded()
     
-    -- Listen for jump input
+    -- Listen for jump input using JumpRequest (more responsive)
     local player = Players.LocalPlayer
+    
+    player.Idled:Connect(function()
+        -- Prevents AFK kick but not needed for jumping
+    end)
+    
+    -- Use UserInputService for space key
     local UserInputService = game:GetService("UserInputService")
     
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
@@ -52,7 +58,7 @@ function Jump:Start()
         end
     end)
     
-    -- Update loop for jump buffering
+    -- Update loop for jump buffering and double jump timing
     self.Connection = RunService.Heartbeat:Connect(function(dt)
         self:Update(dt)
     end)
@@ -66,7 +72,6 @@ function Jump:CheckGrounded()
                      (state == Enum.HumanoidStateType.RunningNoPhysics)
     
     if grounded and not self.IsGrounded then
-        -- Just landed
         self:OnLand()
     end
     
@@ -81,7 +86,6 @@ end
 function Jump:OnLand()
     -- Reset jumps when landing
     self.JumpsRemaining = Constants.MAX_JUMPS
-    self.HasUsedGroundJump = false
     
     -- Apply jump buffer if player pressed jump before landing
     if self.JumpBufferTimer > 0 then
@@ -105,8 +109,8 @@ function Jump:CanJump()
     
     if grounded then
         return true
-    elseif self.JumpsRemaining > 0 and not self.HasUsedGroundJump then
-        -- Allow double jump only once per ground touch
+    elseif self.JumpsRemaining > 0 then
+        -- Allow double jump
         return true
     end
     
@@ -117,46 +121,44 @@ function Jump:ExecuteJump()
     local humanoid = self.Humanoid
     local grounded = self:CheckGrounded()
     
-    -- Determine jump power
+    -- Determine jump power - Blox Fruits style
     local jumpPower = Constants.JUMP_FORCE
     
     if not grounded then
-        -- Double jump!
-        jumpPower = Constants.DOUBLE_JUMP_FORCE
+        -- Double jump! Make it stronger and smoother
+        jumpPower = Constants.DOUBLE_JUMP_FORCE * 1.3 -- Boost the double jump
         
         -- Consume a jump
-        if not self.HasUsedGroundJump then
-            self.HasUsedGroundJump = true
-        else
-            self.JumpsRemaining = self.JumpsRemaining - 1
-        end
+        self.JumpsRemaining = self.JumpsRemaining - 1
         
-        -- Fire event for effects (dash trail, particles, etc.)
+        -- Fire event for effects
         self:OnDoubleJump()
     end
     
-    -- Apply jump
+    -- Apply jump immediately
     humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
     
-    -- Give upward velocity
+    -- Give upward velocity with smooth acceleration
     if self.RootPart then
         local bodyVelocity = Instance.new("BodyVelocity")
         bodyVelocity.MaxForce = Vector3.new(0, math.huge, 0)
         bodyVelocity.Velocity = Vector3.new(0, jumpPower, 0)
         bodyVelocity.Parent = self.RootPart
         
-        -- Remove after small delay
-        task.delay(0.1, function()
+        -- Remove after small delay - gives smooth feel
+        task.delay(0.15, function()
             if bodyVelocity and bodyVelocity.Parent then
                 bodyVelocity:Destroy()
             end
         end)
     end
+    
+    self.LastJumpTime = tick()
 end
 
 function Jump:OnDoubleJump()
-    -- Override this in extending modules for effects
-    -- e.g., spawn particle trail, play sound
+    -- Could spawn particles or play sound here
+    print("Double jump!")
 end
 
 function Jump:Update(dt)

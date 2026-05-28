@@ -13,15 +13,15 @@ Constants.AIR_CONTROL = 0.7 -- Control while airborne (0-1)
 
 -- Jump Settings
 Constants.JUMP_FORCE = 50 -- Jump height power
-Constants.DOUBLE_JUMP_FORCE = 45 -- Double jump power
+Constants.DOUBLE_JUMP_FORCE = 60 -- Double jump power (higher for Blox Fruits feel)
 Constants.MAX_JUMPS = 2 -- Total jumps allowed (1 ground + 1 air)
 Constants.GRAVITY = 50 -- Lower gravity for floaty feel
 Constants.JUMP_BUFFER_TIME = 0.15 -- Input buffer for jumps
 
 -- Dash Settings
-Constants.DASH_SPEED = 80 -- Burst speed during dash
+Constants.DASH_SPEED = 120 -- Burst speed during dash (Blox Fruits style)
 Constants.DASH_DURATION = 0.15 -- How long dash lasts
-Constants.DASH_COOLDOWN = 1.5 -- Cooldown between dashes
+Constants.DASH_COOLDOWN = 0.5 -- Cooldown between dashes (fast for aggressive play)
 Constants.DASH_COOLDOWN_PREMIUM = 1.0 -- With gamepass
 Constants.DASH_CHARGES = 1 -- Charges (2 with gamepass)
 

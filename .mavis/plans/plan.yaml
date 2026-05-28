@@ -1,0 +1,81 @@
+﻿version: 1
+plan:
+  name: 'fix-roblox-entry-point'
+  max_concurrency: 3
+  max_consecutive_failures: 2
+  max_cycles: 5
+tasks:
+  - id: fix-entry-structure
+    title: 'fix Roblox entry point and project structure'
+    prompt: |
+      Fix the Roblox game entry point so scripts actually run when the user hits Play.
+      
+      PROBLEM: Scripts exist in ReplicatedStorage but there's no proper entry point to execute them.
+      
+      FILES TO FIX:
+      1. Update `D:\Game_Development\Chrono-Rush\default.project.json` to include StarterPlayerScripts
+         - Add a path that creates a LocalScript in StarterPlayer/StarterPlayerScripts called "GameStarter"
+      
+      2. Create `D:\Game_Development\Chrono-Rush\src\StarterPlayer\StarterPlayerScripts\GameStarter.client.lua`
+         - This is the entry point that will run when game starts
+         - It should require and start the GameManager
+      
+      3. Update `Init.client.lua` to be simpler - just a module that exports the game components
+      
+      4. The project.json tree should look like:
+         ```
+         DataModel
+           ReplicatedStorage
+             ChronoRush (from src/ReplicatedStorage/ChronoRush)
+           StarterPlayer
+             StarterPlayerScripts
+               GameStarter (from src/StarterPlayer/StarterPlayerScripts)
+           Workspace
+             ChronoRush (from src/Workspace/ChronoRush)
+         ```
+      
+      5. The GameStarter.client.lua should:
+         - Wait for ReplicatedStorage to fully load
+         - Require the GameManager from ReplicatedStorage.ChronoRush.Client.GameManager
+         - Create and start the game manager
+         - Print "ChronoRush started!" to output
+      
+      VERIFY: Run `rojo build --output D:\Game_Development\Chrono-Rush\out\test.rbxlx` to ensure no errors.
+      
+      Report what files changed and the final project.json content.
+    assigned_to: developer
+    verified_by: verifier
+    verify_prompt: |
+      Read the modified files and verify:
+      1. project.json has correct tree structure with StarterPlayerScripts
+      2. GameStarter.client.lua exists and has proper require/start logic
+      3. rojo build completes without errors
+      4. The entry script will execute on game start (not just sit in ReplicatedStorage)
+      
+      Do not modify files. Report any issues found.
+    timeout_ms: 300000
+
+  - id: test-in-roblox
+    title: 'verify game shows UI in Roblox Studio'
+    prompt: |
+      After the entry point fix is applied:
+      1. Check that rojo build succeeds
+      2. Verify the project structure matches what was described
+      
+      The user will test manually in Roblox Studio by:
+      - Refreshing Rojo sync
+      - Hitting Play
+      - Looking for the "CHRONO RUSH" title screen
+      
+      Report the expected behavior after the fix.
+    assigned_to: tester
+    depends_on: [fix-entry-structure]
+    verified_by: verifier
+    verify_prompt: |
+      Verify the fix is complete by checking:
+      1. Files exist where expected
+      2. Rojo builds without errors
+      3. The entry point logic is sound
+      
+      Report findings.
+    timeout_ms: 180000

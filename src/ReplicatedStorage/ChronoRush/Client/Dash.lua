@@ -1,6 +1,7 @@
 --[[
     ChronoRush - Dash Module
     Handles dash ability with cooldown and charges
+    Blox Fruits-style: purely horizontal dash, direction based on where you're facing
 ]]
 
 local Players = game:GetService("Players")
@@ -8,7 +9,8 @@ local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
-local Constants = require(script.Parent.Parent.Shared.Constants)
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Constants = require(ReplicatedStorage:WaitForChild("ChronoRush"):WaitForChild("Shared"):WaitForChild("Constants"))
 
 local Dash = {}
 Dash.__index = Dash
@@ -26,30 +28,18 @@ function Dash.new(character)
     self.MaxCharges = Constants.DASH_CHARGES
     self.IsDashing = false
     
-    -- Direction tracking
-    self.LastMoveDirection = Vector3.new(0, 0, 1) -- Default forward
-    
     return self
 end
 
 function Dash:Start()
     local player = Players.LocalPlayer
     
-    -- Listen for dash input
+    -- Listen for Q key dash
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then return end
         
-        if input.KeyCode == Enum.KeyCode.LeftShift or 
-           input.KeyCode == Enum.KeyCode.RightShift then
+        if input.KeyCode == Enum.KeyCode.Q then
             self:TryDash()
-        end
-    end)
-    
-    -- Track movement direction
-    self.Humanoid:GetPropertyChangedSignal("MoveDirection"):Connect(function()
-        local dir = self.Humanoid.MoveDirection
-        if dir.Magnitude > 0 then
-            self.LastMoveDirection = dir
         end
     end)
     
@@ -78,37 +68,38 @@ function Dash:ExecuteDash()
     self.IsDashing = true
     self.Charges = self.Charges - 1
     
-    -- Determine dash direction
-    local dashDir = self.LastMoveDirection
+    -- BLOX FRUITS STYLE: Dash in the direction you're FACING (LookVector)
+    -- Not in the direction you're moving
+    local dashDir = rootPart.CFrame.LookVector
     
-    -- If no direction, use character's facing direction
+    -- Normalize to purely horizontal (ignore Y)
+    dashDir = Vector3.new(dashDir.X, 0, dashDir.Z)
     if dashDir.Magnitude < 0.1 then
-        dashDir = rootPart.CFrame.LookVector
+        dashDir = Vector3.new(0, 0, 1) -- Default forward if somehow zero
+    end
+    dashDir = dashDir.Unit
+    
+    -- Tell Movement to apply dash with CURRENT Y velocity preserved
+    if self.Character then
+        self.Character:SetAttribute("Dashing", true)
+        self.Character:SetAttribute("DashDirection", dashDir)
+        self.Character:SetAttribute("DashEndTime", tick() + Constants.DASH_DURATION)
     end
     
-    -- Normalize horizontal direction (no vertical dash)
-    dashDir = Vector3.new(dashDir.X, 0, dashDir.Z).Unit
-    
-    -- Create dash velocity
-    local bodyVelocity = Instance.new("BodyVelocity")
-    bodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-    bodyVelocity.Velocity = dashDir * Constants.DASH_SPEED + Vector3.new(0, 20, 0)
-    bodyVelocity.Parent = rootPart
-    
-    -- Spawn trail effect
-    self:SpawnTrail(rootPart)
+    -- Visual effects
+    self:SpawnDashEffect(rootPart)
     
     -- End dash after duration
     task.delay(Constants.DASH_DURATION, function()
-        if bodyVelocity and bodyVelocity.Parent then
-            bodyVelocity:Destroy()
+        if self.Character then
+            self.Character:SetAttribute("Dashing", false)
         end
         self.IsDashing = false
         
         -- Start cooldown
         self.CooldownRemaining = Constants.DASH_COOLDOWN
         
-        -- Recharge after cooldown
+        -- Recharge charge after cooldown
         task.delay(Constants.DASH_COOLDOWN, function()
             if self.Charges < self.MaxCharges then
                 self.Charges = self.Charges + 1
@@ -117,43 +108,53 @@ function Dash:ExecuteDash()
     end)
 end
 
-function Dash:SpawnTrail(rootPart)
-    -- Create visual trail effect during dash
+function Dash:SpawnDashEffect(rootPart)
+    -- Create trail effect
+    local attachment0 = Instance.new("Attachment")
+    attachment0.Position = Vector3.new(0, 0, -0.5)
+    attachment0.Parent = rootPart
+    
+    local attachment1 = Instance.new("Attachment")
+    attachment1.Position = Vector3.new(0, 0, 0.5)
+    attachment1.Parent = rootPart
+    
     local trail = Instance.new("Trail")
+    trail.Attachment0 = attachment0
+    trail.Attachment1 = attachment1
     trail.Lifetime = 0.3
     trail.FaceCamera = true
+    trail.LightEmission = 1
+    trail.LightInfluence = 0.5
     
-    -- Front attachment
-    local a0 = Instance.new("Attachment")
-    a0.Position = Vector3.new(0, 0, -0.5)
-    a0.Parent = rootPart
+    local colorSequence = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Constants.COLOR_DASH_TRAIL),
+        ColorSequenceKeypoint.new(1, Constants.COLOR_DASH_TRAIL:lerp(Color3.new(1, 1, 1), 0.5))
+    })
+    trail.Color = colorSequence
     
-    -- Back attachment
-    local a1 = Instance.new("Attachment")
-    a1.Position = Vector3.new(0, 0, 0.5)
-    a1.Parent = rootPart
-    
-    -- Trail parts
-    local b = Instance.new("Beam")
-    b.Attachment0 = a0
-    b.Attachment1 = a1
-    b.Color = ColorSequence.new(Constants.COLOR_DASH_TRAIL)
-    b.Transparency = NumberSequence.new({
+    local transparencySequence = NumberSequence.new({
         NumberSequenceKeypoint.new(0, 0),
+        NumberSequenceKeypoint.new(0.5, 0.3),
         NumberSequenceKeypoint.new(1, 1)
     })
-    b.Width = 0.5
-    b.Parent = rootPart
+    trail.Transparency = transparencySequence
     
-    -- Remove after dash
+    trail.WidthScale = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 1),
+        NumberSequenceKeypoint.new(1, 0)
+    })
+    
+    trail.Parent = rootPart
+    
+    -- Clean up
     task.delay(Constants.DASH_DURATION + 0.5, function()
-        trail:Destroy()
-        b:Destroy()
+        if trail then trail:Destroy() end
+        if attachment0 then attachment0:Destroy() end
+        if attachment1 then attachment1:Destroy() end
     end)
 end
 
 function Dash:Update(dt)
-    -- Countdown cooldown
     if self.CooldownRemaining > 0 then
         self.CooldownRemaining = self.CooldownRemaining - dt
     end

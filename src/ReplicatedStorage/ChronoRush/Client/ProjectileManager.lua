@@ -5,7 +5,8 @@
 
 local RunService = game:GetService("RunService")
 
-local Constants = require(script.Parent.Parent.Shared.Constants)
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Constants = require(ReplicatedStorage:WaitForChild("ChronoRush"):WaitForChild("Shared"):WaitForChild("Constants"))
 
 local ProjectileManager = {}
 ProjectileManager.__index = ProjectileManager
